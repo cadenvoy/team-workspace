@@ -413,7 +413,7 @@ function isLeader() { return !!me && me.role === '支队长'; }
 function canEditMember(m) { if (!me || !m) return false; if (me.role === '支队长') return true; return !!m.user_id && m.user_id === me.id; }
 function canDeleteMember() { return isLeader(); }
 function canChangeRole() { return isLeader(); }
-function getFakeEmail(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '') + '@team.local'; }
+function getFakeEmail(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '') + '@example.com'; }
 
 /* ---------- 头像渲染与选择 ---------- */
 function setAvatar(el, avatar, name) {
