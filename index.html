@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
@@ -392,11 +392,13 @@ let me = null;
 let currentView = 'tasks';
 let currentChatId = 'conv_all';
 let regAvatar = null;
+let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
 let taskFilter = { status:'all', group:'all' };
 
 const GROUPS = ['学术组','宣传组','设计组','建筑组'];
 const ROLES = ['支队长','副支队长','支队员'];
+const FILE_CATS = ['行前知情同意书','保险凭证','报销凭证','其他材料'];
 const AP_COLORS = ['#FFFFFF', '#000000', '#3b6ef5', '#8b5cf6', '#ec4899', '#f97316', '#f59e0b', '#10b981', '#06b6d4', '#ef4444'];
 const AP_EMOJIS = ['🐱','🐶','🐼','🐯','🦊','🐰','🐨','🐷','🐸','🐵','🦁','🐳','🐧','🦄','🌟','🍀','⚡','🎯','🚀','📚','🎒','☀️','🌙','🌸','🎨','🏛️','🔨','📐'];
 
@@ -406,6 +408,8 @@ function uid() { return Date.now().toString(36) + Math.random().toString(36).sli
 function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
 function pad2(n) { return String(n).padStart(2, '0'); }
 function fmtTime(t) { var d = new Date(t || 0); return (d.getMonth()+1)+'月'+d.getDate()+'日 '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
+function fmtDate(t) { var d = new Date(t || 0); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
+function fmtSize(b) { b = b || 0; return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 function toast(msg) { var el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(function() { el.classList.remove('show'); }, 2200); }
 
 function isManager() { return !!me && (me.role === '支队长' || me.role === '副支队长'); }
@@ -415,7 +419,86 @@ function canDeleteMember() { return isLeader(); }
 function canChangeRole() { return isLeader(); }
 function getFakeEmail(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '') + '@example.com'; }
 
-/* ---------- 头像渲染与选择 ---------- */
+/* ---------- 头像处理 & 裁剪 ---------- */
+function compressImage(file, maxDim, quality) {
+  maxDim = maxDim || 1600; quality = quality || 0.85;
+  return new Promise(function(res, rej) {
+    var img = new Image(); var objUrl = URL.createObjectURL(file);
+    img.onload = function() {
+      var w = img.width, h = img.height;
+      var scale = Math.min(1, maxDim / Math.max(w, h));
+      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
+      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(objUrl);
+      cv.toBlob(function(b) { b ? res(b) : rej(new Error('压缩失败')); }, 'image/jpeg', quality);
+    };
+    img.onerror = function() { URL.revokeObjectURL(objUrl); rej(new Error('图片读取失败')); };
+    img.src = objUrl;
+  });
+}
+
+function openCropModal(file, onDone) {
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function() {
+    var img = new Image();
+    img.onload = function() {
+      var S = 300, OUT = 256;
+      var baseScale = Math.max(S / img.width, S / img.height);
+      var zoom = 1, offX = 0, offY = 0, dragging = false;
+      var startX = 0, startY = 0, startOffX = 0, startOffY = 0;
+      openModal(
+        '<h2>裁剪头像</h2>' +
+        '<div class="crop-wrap"><canvas id="cropCanvas" width="'+S+'" height="'+S+'"></canvas></div>' +
+        '<div class="crop-ctrl"><span>缩放</span><input type="range" id="cropZoom" min="1" max="3" step="0.01" value="1" /></div>' +
+        '<p class="sub" style="text-align:center;margin:10px 0 0">拖动图片调整位置，滑动滑块缩放</p>' +
+        '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="cropOk">确定</button></div>'
+      );
+      var cv = $('#cropCanvas'); var ctx = cv.getContext('2d');
+      function transform() {
+        var scale = baseScale * zoom; var dw = img.width * scale, dh = img.height * scale;
+        var mx = Math.max(0, (dw - S) / 2), my = Math.max(0, (dh - S) / 2);
+        offX = Math.min(mx, Math.max(-mx, offX)); offY = Math.min(my, Math.max(-my, offY));
+        return { dw:dw, dh:dh, x:S/2-dw/2+offX, y:S/2-dh/2+offY };
+      }
+      function draw() {
+        var t = transform(); ctx.clearRect(0,0,S,S); ctx.save();
+        ctx.beginPath(); ctx.arc(S/2,S/2,S/2,0,Math.PI*2); ctx.clip();
+        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,S,S); ctx.drawImage(img,t.x,t.y,t.dw,t.dh);
+        ctx.restore();
+        ctx.beginPath(); ctx.arc(S/2,S/2,S/2-1,0,Math.PI*2);
+        ctx.strokeStyle = 'rgba(59,110,245,.85)'; ctx.lineWidth = 2; ctx.stroke();
+      }
+      draw();
+      cv.addEventListener('pointerdown', function(e) {
+        dragging = true; startX = e.clientX; startY = e.clientY; startOffX = offX; startOffY = offY;
+        try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      cv.addEventListener('pointermove', function(e) {
+        if (!dragging) return;
+        var rect = cv.getBoundingClientRect(); var k = S / rect.width;
+        offX = startOffX + (e.clientX - startX) * k; offY = startOffY + (e.clientY - startY) * k; draw();
+      });
+      function stop() { dragging = false; }
+      cv.addEventListener('pointerup', stop); cv.addEventListener('pointercancel', stop); cv.addEventListener('pointerleave', stop);
+      $('#cropZoom').addEventListener('input', function(e) { zoom = parseFloat(e.target.value); draw(); });
+      $('#cropOk').addEventListener('click', function() {
+        var t = transform(); var out = document.createElement('canvas'); out.width = out.height = OUT;
+        var octx = out.getContext('2d'); var k = OUT / S; octx.save();
+        octx.beginPath(); octx.arc(OUT/2,OUT/2,OUT/2,0,Math.PI*2); octx.clip();
+        octx.fillStyle = '#fff'; octx.fillRect(0,0,OUT,OUT);
+        octx.drawImage(img,t.x*k,t.y*k,t.dw*k,t.dh*k); octx.restore();
+        var data = out.toDataURL('image/jpeg', 0.9); closeModal(); onDone(data);
+      });
+    };
+    img.onerror = function() { toast('图片读取失败'); };
+    img.src = reader.result;
+  };
+  reader.onerror = function() { toast('文件读取失败'); };
+  reader.readAsDataURL(file);
+}
+
 function setAvatar(el, avatar, name) {
   if (!el) return; el.innerHTML = ''; el.style.background = ''; el.style.color = '#fff';
   if (avatar && avatar.kind === 'image' && avatar.data) el.innerHTML = '<img src="'+avatar.data+'" alt="" />';
@@ -426,7 +509,6 @@ function setAvatar(el, avatar, name) {
   }
   else { el.style.background = '#3b6ef5'; el.textContent = name ? name[0] : '?'; }
 }
-
 function avatarHTML(name, avatar, sizeClass) {
   sizeClass = sizeClass || 'avatar-sm';
   if (avatar && avatar.kind === 'image' && avatar.data) return '<span class="avatar '+sizeClass+'"><img src="'+avatar.data+'" alt="" /></span>';
@@ -439,13 +521,8 @@ function avatarHTML(name, avatar, sizeClass) {
 }
 
 function bindAvatarPicker() {
-  $('#apColors').innerHTML = AP_COLORS.map(function(c) { 
-    return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; 
-  }).join('');
-  $('#apEmojis').innerHTML = AP_EMOJIS.map(function(e) { 
-    return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; 
-  }).join('');
-
+  $('#apColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
+  $('#apEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
   $('#apColors').addEventListener('click', function(e) {
     var b = e.target.closest('.dot'); if (!b) return;
     regAvatar = { kind:'gen', color:b.dataset.color, emoji:(regAvatar && regAvatar.emoji) || '' };
@@ -456,10 +533,13 @@ function bindAvatarPicker() {
     regAvatar = { kind:'gen', color:(regAvatar && regAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji };
     renderRegPreview();
   });
+  $('#apFile').addEventListener('change', function(e) {
+    var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    openCropModal(f, function(data) { regAvatar = { kind:'image', data:data }; renderRegPreview(); });
+  });
   $('#regName').addEventListener('input', renderRegPreview);
   renderRegPreview();
 }
-
 function renderRegPreview() {
   var name = $('#regName').value.trim() || '新队员';
   setAvatar($('#apPreview'), regAvatar, name);
@@ -548,31 +628,17 @@ function bindAuthForms() {
 
     $('#btnRegSubmit').textContent = '注册中...'; $('#btnRegSubmit').disabled = true;
 
-    // 查询邀请码 (使用 maybeSingle 避免没查到直接抛错)
     const { data: invite, error: invErr } = await db.from('invite_codes').select('*').eq('code', codeVal).eq('used', false).eq('voided', false).maybeSingle();
-    
-    if (invErr) {
-      console.error("Supabase查询错误:", invErr);
-      errEl.textContent = '查询错误: ' + invErr.message; 
-      $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return;
-    }
-    if (!invite) {
-      errEl.textContent = '注册密钥无效或已被使用'; 
-      $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return;
-    }
+    if (invErr) { errEl.textContent = '查询错误: ' + invErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
+    if (!invite) { errEl.textContent = '注册密钥无效或已被使用'; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
 
-    // 创建 Auth 用户
     const { data: authData, error: authErr } = await db.auth.signUp({ email: getFakeEmail(name), password: pass });
     if (authErr) { 
-      if(authErr.message.includes('already registered')) {
-        errEl.textContent = '该用户名已被占用，请换一个用户名'; 
-      } else {
-        errEl.textContent = authErr.message; 
-      }
+      if(authErr.message.includes('already registered')) errEl.textContent = '该用户名已被占用，请换一个用户名'; 
+      else errEl.textContent = authErr.message; 
       $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; 
     }
 
-    // 写入 members 表
     const role = invite.role === 'leader' ? '支队长' : '支队员';
     const avatarStr = regAvatar ? JSON.stringify(regAvatar) : '';
     
@@ -582,7 +648,6 @@ function bindAuthForms() {
     
     if (memErr) { errEl.textContent = '创建成员信息失败: ' + memErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
 
-    // 标记邀请码已用
     await db.from('invite_codes').update({ used: true, used_by: name, used_at: new Date().toISOString() }).eq('id', invite.id);
 
     await fetchAllData();
@@ -612,7 +677,7 @@ function bindTopbar() {
     if (!confirm('确定要退出登录吗？')) return;
     await db.auth.signOut(); me = null; location.reload();
   });
-  $('#btnProfile').addEventListener('click', function() { toast('资料编辑功能正在完善中'); });
+  $('#btnProfile').addEventListener('click', openProfileModal);
   $('#btnInvite').addEventListener('click', openInviteModal);
   $$('.entry-card').forEach(function(card) { card.addEventListener('click', function() { switchView(card.dataset.goto); }); });
 }
@@ -711,7 +776,7 @@ function bindDocEvents() {
   });
 }
 
-/* ---------- 相册模块 (精简版) ---------- */
+/* ---------- 相册模块 ---------- */
 function renderAlbum() {
   $('#albumCrumbs').innerHTML = '<span class="crumb cur">🏠 根目录</span>';
   $('#albumContent').innerHTML = '<div class="gallery">' + DB.photos.map(function(p) {
@@ -734,14 +799,22 @@ function bindAlbumEvents() {
   });
 }
 
-/* ---------- 成员 ---------- */
+/* ---------- 成员信息表 ---------- */
 function renderMembers() {
   var tbody = $('#memberBody');
   tbody.innerHTML = DB.members.map(function(m) {
-    var acts = canEditMember(m) ? '<button class="btn ghost sm">编辑</button>' : '';
+    var acts = canEditMember(m) ? '<button class="btn ghost sm" data-act="edit" data-id="'+m.id+'">编辑</button>' : '';
     return '<tr><td>'+esc(m.name)+'</td><td>'+esc(m.group_name)+'</td><td>'+esc(m.role)+'</td><td colspan="11">' +
       '<span class="sub">（信息已同步云端）</span></td><td>'+acts+'</td></tr>';
   }).join('');
+  
+  // 绑定成员编辑事件
+  tbody.querySelectorAll('button[data-act="edit"]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var m = DB.members.find(x => x.id === btn.dataset.id);
+      if (canEditMember(m)) openProfileModal();
+    });
+  });
 }
 function bindMemberEvents() {
   $('#btnExportMembers').addEventListener('click', function() { toast('导出功能暂略'); });
@@ -770,7 +843,7 @@ function bindChatEvents() {
   });
 }
 
-/* ---------- 邀请码 ---------- */
+/* ---------- 邀请码管理 ---------- */
 function openInviteModal() {
   if (!isLeader()) return;
   openModal('<h2>邀请码管理</h2><div class="doc-list">' + DB.inviteCodes.map(function(c) {
@@ -780,6 +853,109 @@ function openInviteModal() {
     var code = 'TJ-' + Math.random().toString(36).substring(2, 8).toUpperCase();
     await db.from('invite_codes').insert({ code: code, role: 'member', used: false, voided: false });
     await fetchAllData(); openInviteModal(); toast('已生成：' + code);
+  });
+}
+
+/* ---------- 个人资料弹窗 ---------- */
+function openProfileModal() {
+  var myMember = DB.members.find(m => m.user_id === me.id);
+  if (!myMember) return toast('未找到成员信息');
+  
+  profileAvatar = myMember.avatar_url ? JSON.parse(myMember.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
+  var tempAvatar = JSON.parse(JSON.stringify(profileAvatar)); // 临时保存修改
+
+  openModal(
+    '<h2>我的资料</h2>' +
+    '<div class="avatar-picker" style="margin-bottom:16px">' +
+      '<div class="ap-left"><div class="avatar avatar-xl" id="pfPreview"></div></div>' +
+      '<div class="ap-right">' +
+        '<label class="btn sm">上传图片（可裁剪）<input type="file" id="pfFile" accept="image/*" hidden /></label>' +
+        '<div class="ap-label">或挑一个定制头像</div>' +
+        '<div class="ap-colors" id="pfColors"></div>' +
+        '<div class="ap-emojis" id="pfEmojis"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="grid2">' +
+      '<div class="field"><label>姓名 *</label><input id="pfName" value="'+esc(myMember.name)+'" /></div>' +
+      '<div class="field"><label>组别</label><select id="pfGroup">'+GROUPS.map(g => '<option '+(g===myMember.group_name?'selected':'')+'>'+g+'</option>').join('')+'</select></div>' +
+      '<div class="field"><label>角色（只读）</label><input value="'+esc(myMember.role)+'" readonly style="background:#f5f7fb" /></div>' +
+      '<div class="field"><label>学校</label><input id="pfSchool" value="'+esc(myMember.school||'')+'" /></div>' +
+      '<div class="field"><label>学院</label><input id="pfCollege" value="'+esc(myMember.college||'')+'" /></div>' +
+      '<div class="field"><label>年级</label><input id="pfGrade" value="'+esc(myMember.grade||'')+'" /></div>' +
+      '<div class="field"><label>专业</label><input id="pfMajor" value="'+esc(myMember.major||'')+'" /></div>' +
+      '<div class="field"><label>学号</label><input id="pfStudentId" value="'+esc(myMember.student_id||'')+'" /></div>' +
+      '<div class="field"><label>民族</label><input id="pfEthnicity" value="'+esc(myMember.ethnicity||'')+'" /></div>' +
+      '<div class="field"><label>政治面貌</label><input id="pfPolitical" value="'+esc(myMember.political||'')+'" /></div>' +
+      '<div class="field"><label>身份证号</label><input id="pfIdCard" value="'+esc(myMember.id_card||'')+'" /></div>' +
+      '<div class="field"><label>手机</label><input id="pfPhone" value="'+esc(myMember.phone||'')+'" /></div>' +
+      '<div class="field"><label>紧急联系人</label><input id="pfEmergencyName" value="'+esc(myMember.emergency_name||'')+'" /></div>' +
+      '<div class="field"><label>紧急联系方式</label><input id="pfEmergencyPhone" value="'+esc(myMember.emergency_phone||'')+'" /></div>' +
+      '<div class="field" style="grid-column:1/-1"><label>备注</label><input id="pfNote" value="'+esc(myMember.note||'')+'" /></div>' +
+    '</div>' +
+    '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="pfSave">保存</button></div>',
+    { wide: true }
+  );
+
+  var preview = $('#pfPreview');
+  var paint = function() { setAvatar(preview, tempAvatar, $('#pfName').value.trim() || me.name); };
+  paint();
+
+  $('#pfColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
+  $('#pfEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
+
+  $('#pfColors').addEventListener('click', function(e) {
+    var b = e.target.closest('.dot'); if (!b) return;
+    tempAvatar = { kind:'gen', color:b.dataset.color, emoji:(tempAvatar && tempAvatar.emoji) || '' }; paint();
+  });
+  $('#pfEmojis').addEventListener('click', function(e) {
+    var b = e.target.closest('.emo'); if (!b) return;
+    tempAvatar = { kind:'gen', color:(tempAvatar && tempAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji }; paint();
+  });
+  $('#pfFile').addEventListener('change', function(e) {
+    var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+    openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); });
+  });
+  $('#pfName').addEventListener('input', paint);
+
+  $('#pfSave').addEventListener('click', async function() {
+    var payloadName = $('#pfName').value.trim();
+    if (!payloadName) return toast('请填写姓名');
+    
+    $('#pfSave').textContent = '保存中...'; $('#pfSave').disabled = true;
+
+    var { error } = await db.from('members').update({
+      name: payloadName,
+      group_name: $('#pfGroup').value,
+      school: $('#pfSchool').value.trim(),
+      college: $('#pfCollege').value.trim(),
+      grade: $('#pfGrade').value.trim(),
+      major: $('#pfMajor').value.trim(),
+      student_id: $('#pfStudentId').value.trim(),
+      ethnicity: $('#pfEthnicity').value.trim(),
+      political: $('#pfPolitical').value.trim(),
+      id_card: $('#pfIdCard').value.trim(),
+      phone: $('#pfPhone').value.trim(),
+      emergency_name: $('#pfEmergencyName').value.trim(),
+      emergency_phone: $('#pfEmergencyPhone').value.trim(),
+      note: $('#pfNote').value.trim(),
+      avatar_url: JSON.stringify(tempAvatar)
+    }).eq('user_id', me.id);
+
+    if (error) {
+      toast('保存失败: ' + error.message);
+      $('#pfSave').textContent = '保存'; $('#pfSave').disabled = false;
+      return;
+    }
+
+    // 更新本地状态
+    me.name = payloadName;
+    me.avatar = tempAvatar;
+    
+    await fetchAllData();
+    refreshTopbar();
+    closeModal();
+    toast('资料已更新 ✅');
+    renderMembers(); // 刷新成员列表
   });
 }
 
