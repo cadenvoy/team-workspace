@@ -4,7 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>社会实践支队 · 专属工作台</title>
-<!-- 引入 Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root{--bg:#f5f7fb;--line:#e6eaf2;--text:#1c2430;--muted:#78849a;--primary:#3b6ef5;--primary-d:#2a55cc;--ok:#16a34a;--danger:#e11d48;--r:14px;--h:38px;--hs:30px}
@@ -27,7 +26,7 @@ button{font:inherit;cursor:pointer}input,select,textarea{font:inherit;color:inhe
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .err{color:var(--danger);font-size:13px;min-height:18px;margin:8px 0 0}
 .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:44px 12px;font-size:14px}
-.avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#dbe3f3;color:#fff;font-weight:600;flex:none;width:34px;height:34px;font-size:15px;line-height:1}
+.avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;overflow:hidden;background:#dbe3f3;color:#fff;font-weight:600;flex:none;width:34px;height:34px;font-size:15px;line-height:1;border:1px solid #eee}
 .avatar img{width:100%;height:100%;object-fit:cover;display:block}
 .avatar-sm{width:26px;height:26px;font-size:12px}.avatar-xl{width:84px;height:84px;font-size:32px}
 .auth-view{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:linear-gradient(135deg,#eef3ff,#f7f4ff 55%,#eafaf3)}
@@ -42,7 +41,7 @@ button{font:inherit;cursor:pointer}input,select,textarea{font:inherit;color:inhe
 .ap-left{flex:none}.ap-right{flex:1;min-width:0}
 .ap-label{font-size:12px;color:var(--muted);margin:10px 0 6px}
 .ap-colors{display:flex;gap:6px;flex-wrap:wrap}
-.dot{width:20px;height:20px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);padding:0}
+.dot{width:22px;height:22px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px var(--line);padding:0}
 .ap-emojis{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}
 .emo{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;padding:0}
 .emo:hover{background:#eef3ff}
@@ -388,32 +387,25 @@ const SUPABASE_ANON_KEY = 'sb_publishable_OIFAEOnsoY1M7yl5A4G75A_ihu3hb9e';
 const { createClient } = supabase;
 const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// 全局状态
 let DB = { users:[], tasks:[], members:[], files:[], photos:[], messages:[], folders:[], docs:[], conversations:[], inviteCodes:[] };
 let me = null;
 let currentView = 'tasks';
 let currentChatId = 'conv_all';
 let regAvatar = null;
-let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
 let taskFilter = { status:'all', group:'all' };
 
-// 基础常量
 const GROUPS = ['学术组','宣传组','设计组','建筑组'];
 const ROLES = ['支队长','副支队长','支队员'];
-const FILE_CATS = ['行前知情同意书','保险凭证','报销凭证','其他材料'];
-const AP_COLORS = ['#3b6ef5','#8b5cf6','#ec4899','#f97316','#f59e0b','#10b981','#06b6d4','#ef4444'];
+const AP_COLORS = ['#FFFFFF', '#000000', '#3b6ef5', '#8b5cf6', '#ec4899', '#f97316', '#f59e0b', '#10b981', '#06b6d4', '#ef4444'];
 const AP_EMOJIS = ['🐱','🐶','🐼','🐯','🦊','🐰','🐨','🐷','🐸','🐵','🦁','🐳','🐧','🦄','🌟','🍀','⚡','🎯','🚀','📚','🎒','☀️','🌙','🌸','🎨','🏛️','🔨','📐'];
 
-/* ---------- 工具函数 ---------- */
 function $(s, r) { return (r || document).querySelector(s); }
 function $$(s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); }
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function esc(s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function(c) { return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]; }); }
 function pad2(n) { return String(n).padStart(2, '0'); }
 function fmtTime(t) { var d = new Date(t || 0); return (d.getMonth()+1)+'月'+d.getDate()+'日 '+pad2(d.getHours())+':'+pad2(d.getMinutes()); }
-function fmtDate(t) { var d = new Date(t || 0); return d.getFullYear()+'-'+pad2(d.getMonth()+1)+'-'+pad2(d.getDate()); }
-function fmtSize(b) { b = b || 0; return b < 1024 ? b+' B' : b < 1048576 ? (b/1024).toFixed(1)+' KB' : (b/1048576).toFixed(1)+' MB'; }
 function toast(msg) { var el = $('#toast'); el.textContent = msg; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(function() { el.classList.remove('show'); }, 2200); }
 
 function isManager() { return !!me && (me.role === '支队长' || me.role === '副支队长'); }
@@ -421,27 +413,57 @@ function isLeader() { return !!me && me.role === '支队长'; }
 function canEditMember(m) { if (!me || !m) return false; if (me.role === '支队长') return true; return !!m.user_id && m.user_id === me.id; }
 function canDeleteMember() { return isLeader(); }
 function canChangeRole() { return isLeader(); }
-
-// 生成特定格式的假邮箱（因为 Supabase Auth 需要邮箱）
 function getFakeEmail(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '') + '@team.local'; }
 
-/* ---------- 图片处理 ---------- */
-function compressImage(file, maxDim, quality) {
-  maxDim = maxDim || 1600; quality = quality || 0.85;
-  return new Promise(function(res, rej) {
-    var img = new Image(); var objUrl = URL.createObjectURL(file);
-    img.onload = function() {
-      var w = img.width, h = img.height;
-      var scale = Math.min(1, maxDim / Math.max(w, h));
-      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(img,0,0,w,h);
-      URL.revokeObjectURL(objUrl);
-      cv.toBlob(function(b) { b ? res(b) : rej(new Error('压缩失败')); }, 'image/jpeg', quality);
-    };
-    img.onerror = function() { URL.revokeObjectURL(objUrl); rej(new Error('图片读取失败')); };
-    img.src = objUrl;
+/* ---------- 头像渲染与选择 ---------- */
+function setAvatar(el, avatar, name) {
+  if (!el) return; el.innerHTML = ''; el.style.background = ''; el.style.color = '#fff';
+  if (avatar && avatar.kind === 'image' && avatar.data) el.innerHTML = '<img src="'+avatar.data+'" alt="" />';
+  else if (avatar && avatar.kind === 'gen') { 
+    el.style.background = avatar.color || '#3b6ef5'; 
+    if(avatar.color === '#FFFFFF') el.style.color = '#333'; // 白色背景配深色字
+    el.textContent = avatar.emoji || (name ? name[0] : '?'); 
+  }
+  else { el.style.background = '#3b6ef5'; el.textContent = name ? name[0] : '?'; }
+}
+
+function avatarHTML(name, avatar, sizeClass) {
+  sizeClass = sizeClass || 'avatar-sm';
+  if (avatar && avatar.kind === 'image' && avatar.data) return '<span class="avatar '+sizeClass+'"><img src="'+avatar.data+'" alt="" /></span>';
+  if (avatar && avatar.kind === 'gen') {
+    var color = avatar.color || '#3b6ef5';
+    var textColor = color === '#FFFFFF' ? '#333' : '#fff';
+    return '<span class="avatar '+sizeClass+'" style="background:'+color+';color:'+textColor+'">'+(avatar.emoji || (name?name[0]:'?'))+'</span>';
+  }
+  return '<span class="avatar '+sizeClass+'" style="background:#3b6ef5">'+(name ? name[0] : '?')+'</span>';
+}
+
+// 绑定注册页头像选择事件
+function bindAvatarPicker() {
+  $('#apColors').innerHTML = AP_COLORS.map(function(c) { 
+    return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; 
+  }).join('');
+  $('#apEmojis').innerHTML = AP_EMOJIS.map(function(e) { 
+    return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; 
+  }).join('');
+
+  $('#apColors').addEventListener('click', function(e) {
+    var b = e.target.closest('.dot'); if (!b) return;
+    regAvatar = { kind:'gen', color:b.dataset.color, emoji:(regAvatar && regAvatar.emoji) || '' };
+    renderRegPreview();
   });
+  $('#apEmojis').addEventListener('click', function(e) {
+    var b = e.target.closest('.emo'); if (!b) return;
+    regAvatar = { kind:'gen', color:(regAvatar && regAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji };
+    renderRegPreview();
+  });
+  $('#regName').addEventListener('input', renderRegPreview);
+  renderRegPreview();
+}
+
+function renderRegPreview() {
+  var name = $('#regName').value.trim() || '新队员';
+  setAvatar($('#apPreview'), regAvatar, name);
 }
 
 /* ---------- 弹窗 ---------- */
@@ -455,20 +477,6 @@ function openModal(innerHTML, opts) {
 }
 function closeModal() { var wrap = $('#modalWrap'); wrap.hidden = true; wrap.innerHTML = ''; }
 document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeModal(); });
-
-/* ---------- 头像渲染 ---------- */
-function setAvatar(el, avatar, name) {
-  if (!el) return; el.innerHTML = ''; el.style.background = '';
-  if (avatar && avatar.kind === 'image' && avatar.data) el.innerHTML = '<img src="'+avatar.data+'" alt="" />';
-  else if (avatar && avatar.kind === 'gen') { el.style.background = avatar.color || '#3b6ef5'; el.textContent = avatar.emoji || name[0]; }
-  else { el.style.background = '#3b6ef5'; el.textContent = name ? name[0] : '?'; }
-}
-function avatarHTML(name, avatar, sizeClass) {
-  sizeClass = sizeClass || 'avatar-sm';
-  if (avatar && avatar.kind === 'image' && avatar.data) return '<span class="avatar '+sizeClass+'"><img src="'+avatar.data+'" alt="" /></span>';
-  if (avatar && avatar.kind === 'gen') return '<span class="avatar '+sizeClass+'" style="background:'+(avatar.color || '#3b6ef5')+'">'+(avatar.emoji || name[0])+'</span>';
-  return '<span class="avatar '+sizeClass+'" style="background:#3b6ef5">'+(name ? name[0] : '?')+'</span>';
-}
 
 /* ---------- 数据加载 ---------- */
 async function fetchAllData() {
@@ -493,10 +501,6 @@ async function fetchAllData() {
   DB.conversations = convsRes.data || [];
   DB.messages = msgsRes.data || [];
   DB.inviteCodes = invitesRes.data || [];
-  
-  // 兼容旧字段名
-  DB.tasks.forEach(t => { t.creatorName = t.creator_name; t.group = t.group_name; t.desc = t.description; });
-  DB.members.forEach(m => { m.group = m.group_name; m.studentId = m.student_id; m.emergencyName = m.emergency_name; m.emergencyPhone = m.emergency_phone; });
 }
 
 /* ---------- 登录 / 注册 ---------- */
@@ -524,9 +528,11 @@ function bindAuthForms() {
     const myMember = DB.members.find(m => m.user_id === authData.user.id);
     if (!myMember) { errEl.textContent = '未找到成员信息，请重新注册'; return; }
 
-    me = { id: authData.user.id, name: myMember.name, role: myMember.role, avatar: myMember.avatar || {kind:'gen', color:'#3b6ef5', emoji:''} };
-    // 如果表中没存头像，暂时用文字头像
-    if(myMember.avatar_url) me.avatar = {kind:'image', data: myMember.avatar_url};
+    var avatarData = null;
+    if (myMember.avatar_url) {
+      try { avatarData = JSON.parse(myMember.avatar_url); } catch(e) {}
+    }
+    me = { id: authData.user.id, name: myMember.name, role: myMember.role, avatar: avatarData || {kind:'gen', color:'#3b6ef5', emoji:''} };
 
     $('#btnLoginSubmit').textContent = '登录'; $('#btnLoginSubmit').disabled = false;
     startApp();
@@ -543,27 +549,24 @@ function bindAuthForms() {
 
     $('#btnRegSubmit').textContent = '注册中...'; $('#btnRegSubmit').disabled = true;
 
-    // 1. 校验邀请码
     const { data: invite, error: invErr } = await db.from('invite_codes').select('*').eq('code', codeVal).eq('used', false).eq('voided', false).single();
     if (invErr || !invite) {
       errEl.textContent = '注册密钥无效或已被使用'; 
       $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return;
     }
 
-    // 2. 注册 Auth
     const { data: authData, error: authErr } = await db.auth.signUp({ email: getFakeEmail(name), password: pass });
     if (authErr) { errEl.textContent = authErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
 
-    // 3. 写入 members
     const role = invite.role === 'leader' ? '支队长' : '支队员';
     const avatarStr = regAvatar ? JSON.stringify(regAvatar) : '';
+    
     const { error: memErr } = await db.from('members').insert({
       user_id: authData.user.id, name: name, role: role, group_name: GROUPS[0], avatar_url: avatarStr
     });
     
     if (memErr) { errEl.textContent = '创建成员信息失败: ' + memErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
 
-    // 4. 标记邀请码已用
     await db.from('invite_codes').update({ used: true, used_by: name, used_at: new Date().toISOString() }).eq('id', invite.id);
 
     await fetchAllData();
@@ -577,7 +580,7 @@ function bindAuthForms() {
 /* ---------- 启动 / 顶栏 ---------- */
 function startApp() {
   $('#authView').hidden = true; $('#appView').hidden = false;
-  refreshTopbar(); buildGroupFilter(); buildFileCatSelect(); switchView(currentView);
+  refreshTopbar(); buildGroupFilter(); switchView(currentView);
 }
 function refreshTopbar() {
   if (!me) return;
@@ -593,7 +596,7 @@ function bindTopbar() {
     if (!confirm('确定要退出登录吗？')) return;
     await db.auth.signOut(); me = null; location.reload();
   });
-  $('#btnProfile').addEventListener('click', openProfileModal);
+  $('#btnProfile').addEventListener('click', function() { toast('资料编辑功能正在完善中'); });
   $('#btnInvite').addEventListener('click', openInviteModal);
   $$('.entry-card').forEach(function(card) { card.addEventListener('click', function() { switchView(card.dataset.goto); }); });
 }
@@ -651,7 +654,6 @@ function bindTaskEvents() {
       toast('已删除'); await fetchAllData(); renderTasks();
     }
     if (btn.dataset.act === 'detail') {
-      // 简化详情展示
       alert('任务：' + task.title + '\n\n描述：' + (task.description || '无'));
     }
   });
@@ -765,21 +767,19 @@ function openInviteModal() {
   });
 }
 
-/* ---------- 个人资料 ---------- */
-function openProfileModal() {
-  openModal('<h2>我的资料</h2><p>当前角色：'+me.role+'</p><div class="modal-actions"><button class="btn ghost" data-close>关闭</button></div>');
-}
-
 /* ---------- 初始化流程 ---------- */
 async function init() {
-  // 检查本地是否保存了会话
+  bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindChatEvents();
+  bindAvatarPicker();
+
   const { data: { session } } = await db.auth.getSession();
   if (session) {
     await fetchAllData();
     const myMember = DB.members.find(m => m.user_id === session.user.id);
     if (myMember) {
-      me = { id: session.user.id, name: myMember.name, role: myMember.role, avatar: myMember.avatar || {kind:'gen', color:'#3b6ef5', emoji:''} };
-      if(myMember.avatar_url) me.avatar = {kind:'image', data: myMember.avatar_url};
+      var avatarData = null;
+      if (myMember.avatar_url) { try { avatarData = JSON.parse(myMember.avatar_url); } catch(e){} }
+      me = { id: session.user.id, name: myMember.name, role: myMember.role, avatar: avatarData || {kind:'gen', color:'#3b6ef5', emoji:''} };
       startApp();
       return;
     }
@@ -787,12 +787,7 @@ async function init() {
   $('#authView').hidden = false; $('#appView').hidden = true;
 }
 
-// 绑定基础事件
-bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindChatEvents();
-// 建立头像选色界面
-$('#apColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
-$('#apEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
-
-// 启动
 init();
 </script>
+</body>
+</html>
