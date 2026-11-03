@@ -422,7 +422,7 @@ let regAvatar = null;
 let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
 let docState = { selectMode: false, selected: new Set() };
-let fileState = { selectMode: false, selected: new Set() }; // 档案文件多选状态
+let fileState = { selectMode: false, selected: new Set() };
 let taskFilter = { status:'all', group:'all' };
 let fileFilter = 'all';
 
@@ -792,7 +792,7 @@ function startApp() {
   $('#authView').hidden = true; $('#appView').hidden = false;
   refreshTopbar(); buildGroupFilter(); switchView(currentView);
   
-  // 开启全局静默轮询（5秒一次），实现任务、文件、聊天动态更新
+  // 开启全局静默轮询（5秒一次）
   setInterval(pollDataSilently, 5000);
 }
 function refreshTopbar() {
@@ -854,13 +854,8 @@ function renderTasks() {
     var isRejected = (t.status === 'todo' && t.reject_reason);
     
     var acts = '<button class="btn ghost sm" data-act="detail" data-id="'+t.id+'">详情</button>';
-    
-    if (t.status === 'todo' && isOwner) {
-      acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
-    }
-    if (t.status === 'pending' && isManager()) {
-      acts += '<button class="btn primary sm" data-act="review" data-id="'+t.id+'">批复</button>';
-    }
+    if (t.status === 'todo' && isOwner) acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
+    if (t.status === 'pending' && isManager()) acts += '<button class="btn primary sm" data-act="review" data-id="'+t.id+'">批复</button>';
     if (isManager()) acts += '<button class="btn danger sm" data-act="del" data-id="'+t.id+'">删除</button>';
     
     var isHighlight = (t.group_name === me.group_name || t.group_name === '全部组别') && t.status !== 'done';
@@ -885,16 +880,9 @@ function bindTaskEvents() {
       await db.from('tasks').update({ status: 'pending', submitted_by: me.name, submitted_at: new Date().toISOString(), reject_reason: null }).eq('id', id);
       toast('已提交，等待批复'); await fetchAllData(); renderTasks();
     }
-    
     if (btn.dataset.act === 'review') {
-      openModal(
-        '<h2>批复任务</h2>' +
-        '<p>任务：' + esc(task.title) + '</p>' +
-        '<div class="modal-actions">' +
-          '<button class="btn danger" id="btnReject">驳回</button>' +
-          '<button class="btn primary" id="btnApprove">通过</button>' +
-        '</div>'
-      );
+      openModal('<h2>批复任务</h2><p>任务：' + esc(task.title) + '</p>' +
+        '<div class="modal-actions"><button class="btn danger" id="btnReject">驳回</button><button class="btn primary" id="btnApprove">通过</button></div>');
       $('#btnApprove').addEventListener('click', async function() {
         await db.from('tasks').update({ status: 'done', done_by: me.name, done_at: new Date().toISOString() }).eq('id', id);
         closeModal(); toast('已批复通过'); await fetchAllData(); renderTasks();
@@ -904,45 +892,33 @@ function bindTaskEvents() {
         closeModal(); toast('已驳回'); await fetchAllData(); renderTasks();
       });
     }
-    
     if (btn.dataset.act === 'del') {
       if (!confirm('确定删除？')) return;
       await db.from('tasks').delete().eq('id', id);
       toast('已删除'); await fetchAllData(); renderTasks();
     }
-    
     if (btn.dataset.act === 'detail') {
       var meta = task.status === 'done' ? {label:'已完成', cls:'ok'} : task.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
-      
-      var timelineHtml = '<ul class="timeline">';
-      timelineHtml += '<li class="active"><b>任务发布</b><div class="time">'+esc(task.creator_name||'系统')+' 于 '+fmtTime(task.created_at)+'</div></li>';
-      if (task.submitted_at) {
-        timelineHtml += '<li class="active"><b>提交完成</b><div class="time">'+esc(task.submitted_by)+' 于 '+fmtTime(task.submitted_at)+'</div></li>';
-      }
-      if (task.status === 'done' && task.done_at) {
-        timelineHtml += '<li class="active"><b>批复通过</b><div class="time">'+esc(task.done_by)+' 于 '+fmtTime(task.done_at)+'</div></li>';
-      }
-      if (task.reject_reason) {
-        timelineHtml += '<li class="active" style="color:#e11d48"><b>被驳回</b><div class="time" style="color:#e11d48">原因：'+esc(task.reject_reason)+'</div></li>';
-      }
+      var timelineHtml = '<ul class="timeline">' +
+        '<li class="active"><b>任务发布</b><div class="time">'+esc(task.creator_name||'系统')+' 于 '+fmtTime(task.created_at)+'</div></li>';
+      if (task.submitted_at) timelineHtml += '<li class="active"><b>提交完成</b><div class="time">'+esc(task.submitted_by)+' 于 '+fmtTime(task.submitted_at)+'</div></li>';
+      if (task.status === 'done' && task.done_at) timelineHtml += '<li class="active"><b>批复通过</b><div class="time">'+esc(task.done_by)+' 于 '+fmtTime(task.done_at)+'</div></li>';
+      if (task.reject_reason) timelineHtml += '<li class="active" style="color:#e11d48"><b>被驳回</b><div class="time" style="color:#e11d48">原因：'+esc(task.reject_reason)+'</div></li>';
       timelineHtml += '</ul>';
 
-      openModal(
-        '<h2>'+esc(task.title)+'</h2>' +
+      openModal('<h2>'+esc(task.title)+'</h2>' +
         '<div class="detail-row"><span class="k">状态</span><span class="v"><span class="chip '+meta.cls+'">'+meta.label+'</span></span></div>' +
         '<div class="detail-row"><span class="k">组别</span><span class="v">'+esc(task.group_name)+'</span></div>' +
         '<div class="detail-row"><span class="k">负责人</span><span class="v">'+esc(task.owner||'未指定')+'</span></div>' +
         '<div class="detail-row"><span class="k">截止日期</span><span class="v">'+esc(task.due_date||'未设置')+'</span></div>' +
         '<div class="detail-row"><span class="k">任务描述</span><span class="v">'+esc(task.description||'无').replace(/\n/g,'<br>')+'</span></div>' +
         '<div class="detail-row" style="flex-direction:column;align-items:flex-start;gap:6px;margin-top:10px"><span class="k" style="width:auto">操作时间线</span><span class="v" style="width:100%">'+timelineHtml+'</span></div>' +
-        '<div class="modal-actions"><button class="btn ghost" data-close>关闭</button></div>'
-      );
+        '<div class="modal-actions"><button class="btn ghost" data-close>关闭</button></div>');
     }
   });
 
   $('#btnNewTask').addEventListener('click', function() {
     var ownerHtml = DB.members.map(m => '<label class="pick-item"><input type="checkbox" name="tOwners" value="'+esc(m.name)+'" /> '+esc(m.name)+'</label>').join('');
-    
     openModal('<h2>发布任务</h2>' +
       '<div class="field"><label>任务标题</label><input id="tTitle" placeholder="例如：联系实践接收单位" /></div>' +
       '<div class="field"><label>任务描述</label><textarea id="tDesc" rows="3" placeholder="具体交付标准等"></textarea></div>' +
@@ -978,164 +954,88 @@ function bindTaskEvents() {
 /* ---------- 文档中心 ---------- */
 function renderDocs() {
   var list = $('#docList'); $('#docSummary').textContent = '实践必备文件 · 共 '+DB.docs.length+' 份';
-  
   if (docState.selectMode) {
-    $('#btnDocMode').textContent = '取消';
-    $('#btnDocMode').classList.add('on');
-    $('#multiBar').hidden = false;
-    $('#multiCount').textContent = '已选 ' + docState.selected.size + ' 项';
+    $('#btnDocMode').textContent = '取消'; $('#btnDocMode').classList.add('on');
+    $('#multiBar').hidden = false; $('#multiCount').textContent = '已选 ' + docState.selected.size + ' 项';
     $('#multiDelete').hidden = !isManager();
   } else {
-    $('#btnDocMode').textContent = '管理';
-    $('#btnDocMode').classList.remove('on');
-    $('#multiBar').hidden = true;
+    $('#btnDocMode').textContent = '管理'; $('#btnDocMode').classList.remove('on'); $('#multiBar').hidden = true;
   }
-
   if (!DB.docs.length) { list.innerHTML = '<div class="empty">暂无文件</div>'; return; }
-  
   list.innerHTML = DB.docs.map(function(d) {
     var isSel = docState.selected.has(d.id);
     return '<div class="doc-item '+(isSel?'selected':'')+'" data-id="'+d.id+'" style="'+(isSel?'background:#eaf0ff;border-color:#c9d9ff;':'')+'">' +
       (docState.selectMode ? '<div style="width:18px;height:18px;border-radius:4px;border:1px solid #ccc;background:'+(isSel?'var(--primary)':'#fff')+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">'+(isSel?'✓':'')+'</div>' : '') +
-      '<div class="file-icon">📄</div>' +
-      '<div class="doc-info"><div class="doc-name">'+esc(d.name)+'</div>' +
-      '<div class="doc-meta">'+esc(d.uploader_name)+'</div></div>' +
+      '<div class="file-icon">📄</div><div class="doc-info"><div class="doc-name">'+esc(d.name)+'</div><div class="doc-meta">'+esc(d.uploader_name)+'</div></div>' +
       (docState.selectMode ? '' : '<a href="'+d.blob_key+'" target="_blank" class="btn sm" onclick="event.stopPropagation()">下载</a>') +
     '</div>';
   }).join('');
-  
   if (!docState.selectMode) markDocsRead();
 }
 function bindDocEvents() {
-  $('#btnDocMode').addEventListener('click', function() {
-    docState.selectMode = !docState.selectMode;
-    docState.selected.clear();
-    renderDocs();
-  });
-  
+  $('#btnDocMode').addEventListener('click', function() { docState.selectMode = !docState.selectMode; docState.selected.clear(); renderDocs(); });
   $('#docList').addEventListener('click', function(e) {
     if (!docState.selectMode) return;
     var item = e.target.closest('.doc-item'); if (!item) return;
-    var id = item.dataset.id;
-    if (docState.selected.has(id)) docState.selected.delete(id);
-    else docState.selected.add(id);
-    renderDocs();
+    var id = item.dataset.id; if (docState.selected.has(id)) docState.selected.delete(id); else docState.selected.add(id); renderDocs();
   });
-
   $('#docInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
     toast('正在上传到云端...');
     for (var i = 0; i < files.length; i++) {
-      var f = files[i]; 
-      var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
-      var path = 'docs/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
-      
+      var f = files[i]; var ext = f.name.match(/\.[^.]+$/)?.[0] || ''; var path = 'docs/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
       try {
-        var { error } = await db.storage.from('media').upload(path, f);
-        if (error) throw error;
+        var { error } = await db.storage.from('media').upload(path, f); if (error) throw error;
         var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        var { error: dbErr } = await db.from('docs').insert({ name: f.name, size: f.size, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
-        if (dbErr) throw dbErr;
+        var { error: dbErr } = await db.from('docs').insert({ name: f.name, size: f.size, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name }); if (dbErr) throw dbErr;
       } catch (err) { alert('上传失败: ' + err.message); }
     }
     e.target.value = ''; toast('上传完毕'); await fetchAllData(); renderDocs();
   });
 }
 
-/* ---------- 档案文件资料（支持管理） ---------- */
-function buildFileCatSelect() {
-  var filterHtml = '<option value="all">全部资料</option>' + FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
-  $('#fileFilterSelect').innerHTML = filterHtml;
-}
-
+/* ---------- 档案文件资料 ---------- */
+function buildFileCatSelect() { $('#fileFilterSelect').innerHTML = '<option value="all">全部资料</option>' + FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join(''); }
 function renderFiles() {
   var box = $('#fileList');
-  
   if (fileState.selectMode) {
-    $('#btnFileMode').textContent = '取消';
-    $('#btnFileMode').classList.add('on');
-    $('#multiBar').hidden = false;
-    $('#multiCount').textContent = '已选 ' + fileState.selected.size + ' 项';
-    $('#multiDelete').hidden = !isManager(); // 仅管理员可删
+    $('#btnFileMode').textContent = '取消'; $('#btnFileMode').classList.add('on');
+    $('#multiBar').hidden = false; $('#multiCount').textContent = '已选 ' + fileState.selected.size + ' 项';
+    $('#multiDelete').hidden = !isManager();
   } else {
-    $('#btnFileMode').textContent = '管理';
-    $('#btnFileMode').classList.remove('on');
-    $('#multiBar').hidden = true;
+    $('#btnFileMode').textContent = '管理'; $('#btnFileMode').classList.remove('on'); $('#multiBar').hidden = true;
   }
-
-  var filtered = DB.files;
-  if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
-  
+  var filtered = DB.files; if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
   if (!filtered.length) { box.innerHTML = '<div class="empty">暂无归档文件</div>'; return; }
-  
   box.innerHTML = filtered.map(function(f) {
     var isSel = fileState.selected.has(f.id);
     return '<div class="file-item '+(isSel?'selected':'')+'" data-id="'+f.id+'">' +
       (fileState.selectMode ? '<div style="width:18px;height:18px;border-radius:4px;border:1px solid #ccc;background:'+(isSel?'var(--primary)':'#fff')+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">'+(isSel?'✓':'')+'</div>' : '') +
-      '<div class="file-icon">📎</div>' +
-      '<div class="file-info">' +
-        '<div class="file-name">'+esc(f.name)+'</div>' +
-        '<div class="file-meta">' +
-          '<span class="chip cat">'+esc(f.category||'其他')+'</span>' +
-          '<span>'+esc(f.uploader_name)+'</span>' +
-        '</div>' +
-      '</div>' +
-      '<div class="file-actions">' +
-        (fileState.selectMode ? '' : '<a href="'+f.blob_key+'" target="_blank" class="btn sm">下载</a>') +
-      '</div>' +
-    '</div>';
+      '<div class="file-icon">📎</div><div class="file-info"><div class="file-name">'+esc(f.name)+'</div><div class="file-meta"><span class="chip cat">'+esc(f.category||'其他')+'</span><span>'+esc(f.uploader_name)+'</span></div></div>' +
+      '<div class="file-actions">' + (fileState.selectMode ? '' : '<a href="'+f.blob_key+'" target="_blank" class="btn sm">下载</a>') + '</div></div>';
   }).join('');
 }
-
 function bindFileEvents() {
-  $('#btnFileMode').addEventListener('click', function() {
-    fileState.selectMode = !fileState.selectMode;
-    fileState.selected.clear();
-    renderFiles();
-  });
-
+  $('#btnFileMode').addEventListener('click', function() { fileState.selectMode = !fileState.selectMode; fileState.selected.clear(); renderFiles(); });
   $('#fileList').addEventListener('click', function(e) {
     if (!fileState.selectMode) return;
     var item = e.target.closest('.file-item'); if (!item) return;
-    var id = item.dataset.id;
-    if (fileState.selected.has(id)) fileState.selected.delete(id);
-    else fileState.selected.add(id);
-    renderFiles();
+    var id = item.dataset.id; if (fileState.selected.has(id)) fileState.selected.delete(id); else fileState.selected.add(id); renderFiles();
   });
-
-  $('#fileFilterSelect').addEventListener('change', function(e) {
-    fileFilter = e.target.value;
-    renderFiles();
-  });
-
+  $('#fileFilterSelect').addEventListener('change', function(e) { fileFilter = e.target.value; renderFiles(); });
   $('#btnOpenUploadFile').addEventListener('click', function() {
     var catOptions = FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
-    openModal(
-      '<h2>上传文件资料</h2>' +
-      '<div class="field"><label>选择类别</label><select id="uploadCat">'+catOptions+'</select></div>' +
-      '<div class="field"><label>选择文件</label><input type="file" id="uploadFileInput" multiple /></div>' +
-      '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="btnDoUpload">上传</button></div>'
-    );
+    openModal('<h2>上传文件资料</h2><div class="field"><label>选择类别</label><select id="uploadCat">'+catOptions+'</select></div><div class="field"><label>选择文件</label><input type="file" id="uploadFileInput" multiple /></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="btnDoUpload">上传</button></div>');
     $('#btnDoUpload').addEventListener('click', async function() {
-      var files = $('#uploadFileInput').files;
-      if (!files.length) return toast('请选择文件');
-      var cat = $('#uploadCat').value;
-      
+      var files = $('#uploadFileInput').files; if (!files.length) return toast('请选择文件'); var cat = $('#uploadCat').value;
       $('#btnDoUpload').textContent = '上传中...'; $('#btnDoUpload').disabled = true;
-      
       for (var i = 0; i < files.length; i++) {
-        var f = files[i]; 
-        var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
-        var path = 'files/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
-        
+        var f = files[i]; var ext = f.name.match(/\.[^.]+$/)?.[0] || ''; var path = 'files/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
         try {
-          var { error } = await db.storage.from('media').upload(path, f);
-          if (error) throw error;
+          var { error } = await db.storage.from('media').upload(path, f); if (error) throw error;
           var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-          var { error: dbErr } = await db.from('files').insert({ 
-            name: f.name, size: f.size, category: cat, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name 
-          });
-          if (dbErr) throw dbErr;
+          var { error: dbErr } = await db.from('files').insert({ name: f.name, size: f.size, category: cat, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name }); if (dbErr) throw dbErr;
         } catch (err) { alert('上传失败: ' + err.message); }
       }
       closeModal(); toast('文件上传完毕'); await fetchAllData(); renderFiles();
@@ -1143,48 +1043,59 @@ function bindFileEvents() {
   });
 }
 
-/* ---------- 全局多选操作路由 (由文档/文件/相册共用) ---------- */
+/* ---------- 全局多选操作路由 ---------- */
+function exitMultiMode() {
+  albumState.selectMode = false;
+  albumState.selected.clear();
+  $('#multiBar').hidden = true;
+  $('#btnMulti').textContent = '多选';
+  $('#btnMulti').classList.remove('on');
+  renderAlbum();
+}
+
 function bindMultiBarEvents() {
   $('#multiAll').addEventListener('click', function() {
-    if (currentView === 'tasks') { // 文档
-      if (docState.selected.size === DB.docs.length) docState.selected.clear();
-      else DB.docs.forEach(d => docState.selected.add(d.id));
-      renderDocs();
+    if (currentView === 'tasks') {
+      if (docState.selected.size === DB.docs.length) docState.selected.clear(); else DB.docs.forEach(d => docState.selected.add(d.id)); renderDocs();
     } else if (currentView === 'album') {
-      var items = currentVisibleMedia();
-      if (albumState.selected.size === items.length) albumState.selected.clear();
-      else items.forEach(p => albumState.selected.add(p.id));
-      renderAlbum();
-    } else if (currentView === 'members') { // 文件
-      var filtered = DB.files;
+      let items = DB.photos;
+      if (albumState.filter === 'fav') items = items.filter(p => p.fav);
+      else if (albumState.currentFolderId) items = items.filter(p => p.folder_id === albumState.currentFolderId);
+      else items = items.filter(p => !p.folder_id);
+      if (albumState.selected.size === items.length) albumState.selected.clear(); else items.forEach(p => albumState.selected.add(p.id)); renderAlbum();
+    } else if (currentView === 'members') {
+      let filtered = DB.files;
       if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
-      if (fileState.selected.size === filtered.length) fileState.selected.clear();
-      else filtered.forEach(f => fileState.selected.add(f.id));
-      renderFiles();
+      if (fileState.selected.size === filtered.length) fileState.selected.clear(); else filtered.forEach(f => fileState.selected.add(f.id)); renderFiles();
     }
   });
 
   $('#multiCancel').addEventListener('click', function() {
-    if (currentView === 'tasks') { docState.selectMode = false; docState.selected.clear(); renderDocs(); }
-    else if (currentView === 'album') exitMultiMode();
-    else if (currentView === 'members') { fileState.selectMode = false; fileState.selected.clear(); renderFiles(); }
+    // 无论当前在哪个页面，强制清除所有选中状态并隐藏底部栏
+    docState.selectMode = false; docState.selected.clear();
+    fileState.selectMode = false; fileState.selected.clear();
+    albumState.selectMode = false; albumState.selected.clear();
+    
+    $('#multiBar').hidden = true;
+    $('#btnMulti').textContent = '多选'; $('#btnMulti').classList.remove('on');
+    $('#btnDocMode').textContent = '管理'; $('#btnDocMode').classList.remove('on');
+    $('#btnFileMode').textContent = '管理'; $('#btnFileMode').classList.remove('on');
+
+    if (currentView === 'tasks') renderDocs();
+    else if (currentView === 'album') renderAlbum();
+    else if (currentView === 'members') renderFiles();
   });
 
   $('#multiDownload').addEventListener('click', function() {
     if (currentView === 'tasks') {
       if (!docState.selected.size) return toast('请先勾选');
-      docState.selected.forEach(id => {
-        var d = DB.docs.find(x => x.id === id);
-        if (d) { var a = document.createElement('a'); a.href = d.blob_key; a.target = '_blank'; a.download = d.name; a.click(); }
-      });
+      docState.selected.forEach(id => { var d = DB.docs.find(x => x.id === id); if (d) { var a = document.createElement('a'); a.href = d.blob_key; a.target = '_blank'; a.download = d.name; a.click(); } });
     } else if (currentView === 'album') {
-      downloadSelected();
+      if (!albumState.selected.size) return toast('请先勾选');
+      albumState.selected.forEach(id => { var p = DB.photos.find(x => x.id === id); if (p) { var a = document.createElement('a'); a.href = p.blob_key; a.target = '_blank'; a.download = p.name; a.click(); } });
     } else if (currentView === 'members') {
       if (!fileState.selected.size) return toast('请先勾选');
-      fileState.selected.forEach(id => {
-        var f = DB.files.find(x => x.id === id);
-        if (f) { var a = document.createElement('a'); a.href = f.blob_key; a.target = '_blank'; a.download = f.name; a.click(); }
-      });
+      fileState.selected.forEach(id => { var f = DB.files.find(x => x.id === id); if (f) { var a = document.createElement('a'); a.href = f.blob_key; a.target = '_blank'; a.download = f.name; a.click(); } });
     }
   });
 
@@ -1196,7 +1107,10 @@ function bindMultiBarEvents() {
       for (let id of docState.selected) { await db.from('docs').delete().eq('id', id); }
       docState.selected.clear(); docState.selectMode = false; await fetchAllData(); renderDocs();
     } else if (currentView === 'album') {
-      // 相册删除逻辑
+      if (!albumState.selected.size) return toast('请先勾选');
+      if (!confirm('确定删除选中的 ' + albumState.selected.size + ' 张图片？')) return;
+      for (let id of albumState.selected) { await db.from('photos').delete().eq('id', id); }
+      albumState.selected.clear(); albumState.selectMode = false; await fetchAllData(); renderAlbum();
     } else if (currentView === 'members') {
       if (!isManager()) return toast('仅管理员可删除');
       if (!fileState.selected.size) return toast('请先勾选');
@@ -1210,17 +1124,12 @@ function bindMultiBarEvents() {
 /* ---------- 相册模块 ---------- */
 function renderAlbum() {
   var content = $('#albumContent');
-  
   if (albumState.selectMode) {
-    $('#btnMulti').textContent = '取消多选';
-    $('#btnMulti').classList.add('on');
-    $('#multiBar').hidden = false;
-    $('#multiCount').textContent = '已选 ' + albumState.selected.size + ' 项';
+    $('#btnMulti').textContent = '取消多选'; $('#btnMulti').classList.add('on');
+    $('#multiBar').hidden = false; $('#multiCount').textContent = '已选 ' + albumState.selected.size + ' 项';
     $('#multiDelete').hidden = false;
   } else {
-    $('#btnMulti').textContent = '多选';
-    $('#btnMulti').classList.remove('on');
-    $('#multiBar').hidden = true;
+    $('#btnMulti').textContent = '多选'; $('#btnMulti').classList.remove('on'); $('#multiBar').hidden = true;
   }
 
   if (albumState.filter === 'fav') {
@@ -1233,21 +1142,14 @@ function renderAlbum() {
   }
 
   var html = '';
-
   if (albumState.filter === 'all' && !albumState.currentFolderId) {
     var folders = DB.folders || [];
     if (folders.length > 0) {
       html += '<div class="folder-grid">' + folders.map(function(f) {
-        return '<div class="folder-card" data-fid="'+f.id+'">' +
-          '<div class="fic">📁</div>' +
-          '<div class="fnm">'+esc(f.name)+'</div>' +
-          '<div class="fmeta">点击进入</div>' +
-          '<button class="fdel" data-del-fid="'+f.id+'">✕</button>' +
-        '</div>';
+        return '<div class="folder-card" data-fid="'+f.id+'"><div class="fic">📁</div><div class="fnm">'+esc(f.name)+'</div><div class="fmeta">点击进入</div><button class="fdel" data-del-fid="'+f.id+'">✕</button></div>';
       }).join('') + '</div>';
     }
   }
-
   var items = DB.photos.slice();
   if (albumState.filter === 'fav') items = items.filter(p => p.fav);
   else if (albumState.currentFolderId) items = items.filter(p => p.folder_id === albumState.currentFolderId);
@@ -1256,18 +1158,12 @@ function renderAlbum() {
   if (items.length > 0) {
     html += '<div class="gallery">' + items.map(function(p) {
       var selected = albumState.selected.has(p.id) ? 'selected' : '';
-      return '<figure class="ph ' + selected + '" data-id="'+p.id+'">' +
-        '<div class="thumb"><img src="'+p.blob_key+'" /></div>' +
-        (albumState.selectMode 
-          ? '<div class="ph-check">'+(selected ? '✓' : '')+'</div>' 
-          : '<div class="ph-fav '+(p.fav?'on':'')+'" data-act="fav" data-id="'+p.id+'">★</div>') +
-        '<figcaption>'+esc(p.uploader_name || '未知')+'</figcaption>' +
-      '</figure>';
+      return '<figure class="ph ' + selected + '" data-id="'+p.id+'"><div class="thumb"><img src="'+p.blob_key+'" /></div>' +
+        (albumState.selectMode ? '<div class="ph-check">'+(selected ? '✓' : '')+'</div>' : '<div class="ph-fav '+(p.fav?'on':'')+'" data-act="fav" data-id="'+p.id+'">★</div>') +
+        '<figcaption>'+esc(p.uploader_name || '未知')+'</figcaption></figure>';
     }).join('') + '</div>';
   }
-
   if (!html) html = '<div class="empty">该目录下暂无内容</div>';
-
   content.innerHTML = html;
   $('#albumSummary').textContent = '共 ' + DB.photos.length + ' 个媒体 · ' + (DB.folders ? DB.folders.length : 0) + ' 个文件夹';
 }
@@ -1275,95 +1171,53 @@ function renderAlbum() {
 function bindAlbumEvents() {
   $$('#albumSeg .seg-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
-      $$('#albumSeg .seg-btn').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      albumState.filter = btn.dataset.filter;
-      albumState.currentFolderId = null; 
-      renderAlbum();
+      $$('#albumSeg .seg-btn').forEach(function(b) { b.classList.remove('active'); }); btn.classList.add('active');
+      albumState.filter = btn.dataset.filter; albumState.currentFolderId = null; renderAlbum();
     });
   });
-
   $('#albumCrumbs').addEventListener('click', function(e) {
-    var crumb = e.target.closest('[data-crumb]');
-    if (crumb) { albumState.currentFolderId = null; renderAlbum(); }
+    var crumb = e.target.closest('[data-crumb]'); if (crumb) { albumState.currentFolderId = null; renderAlbum(); }
   });
-
   $('#btnNewFolder').addEventListener('click', function() {
-    openModal('<h2>新建文件夹</h2>' +
-      '<div class="field"><label>文件夹名称</label><input id="folderName" placeholder="例如：调研现场" /></div>' +
-      '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="folderSave">创建</button></div>');
+    openModal('<h2>新建文件夹</h2><div class="field"><label>文件夹名称</label><input id="folderName" placeholder="例如：调研现场" /></div><div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="folderSave">创建</button></div>');
     $('#folderSave').addEventListener('click', async function() {
       var name = $('#folderName').value.trim(); if (!name) return toast('请输入名称');
       await db.from('folders').insert({ name: name, created_by: me.id });
       closeModal(); toast('文件夹已创建'); await fetchAllData(); renderAlbum();
     });
   });
-
   $('#photoInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
     for (var i = 0; i < files.length; i++) {
-      var f = files[i]; 
-      var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
-      var path = 'photos/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
-      
+      var f = files[i]; var ext = f.name.match(/\.[^.]+$/)?.[0] || ''; var path = 'photos/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
       toast('正在上传 ' + f.name + '...');
       try {
-        var { error } = await db.storage.from('media').upload(path, f);
-        if (error) throw error;
+        var { error } = await db.storage.from('media').upload(path, f); if (error) throw error;
         var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        var { error: dbErr } = await db.from('photos').insert({ 
-          name: f.name, kind: 'image', blob_key: urlData.publicUrl, 
-          uploader_id: me.id, uploader_name: me.name,
-          folder_id: albumState.currentFolderId || null
-        });
-        if (dbErr) throw dbErr;
+        var { error: dbErr } = await db.from('photos').insert({ name: f.name, kind: 'image', blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name, folder_id: albumState.currentFolderId || null }); if (dbErr) throw dbErr;
       } catch (err) { alert('上传失败: ' + err.message); }
     }
     e.target.value = ''; await fetchAllData(); renderAlbum(); toast('上传成功');
   });
-
   $('#albumContent').addEventListener('click', async function(e) {
     var delBtn = e.target.closest('.fdel');
-    if (delBtn) {
-      e.stopPropagation();
-      if (!confirm('删除文件夹？（里面的照片会回到根目录）')) return;
+    if (delBtn) { e.stopPropagation(); if (!confirm('删除文件夹？（里面的照片会回到根目录）')) return;
       await db.from('folders').delete().eq('id', delBtn.dataset.delFid);
       await db.from('photos').update({ folder_id: null }).eq('folder_id', delBtn.dataset.delFid);
       await fetchAllData(); renderAlbum(); return;
     }
-
     var folderCard = e.target.closest('.folder-card');
-    if (folderCard) {
-      albumState.currentFolderId = folderCard.dataset.fid;
-      renderAlbum(); return;
-    }
-
+    if (folderCard) { albumState.currentFolderId = folderCard.dataset.fid; renderAlbum(); return; }
     var favBtn = e.target.closest('.ph-fav');
-    if (favBtn) {
-      e.stopPropagation();
-      var pId = favBtn.dataset.id;
-      var p = DB.photos.find(x => x.id === pId);
-      if (p) { p.fav = !p.fav; db.from('photos').update({fav: p.fav}).eq('id', pId).then(() => renderAlbum()); }
-      return;
-    }
-
-    var fig = e.target.closest('.ph');
-    if (!fig) return;
+    if (favBtn) { e.stopPropagation(); var pId = favBtn.dataset.id; var p = DB.photos.find(x => x.id === pId); if (p) { p.fav = !p.fav; db.from('photos').update({fav: p.fav}).eq('id', pId).then(() => renderAlbum()); } return; }
+    var fig = e.target.closest('.ph'); if (!fig) return;
     var pId = fig.dataset.id;
-
     if (albumState.selectMode) {
-      if (albumState.selected.has(pId)) albumState.selected.delete(pId);
-      else albumState.selected.add(pId);
-      renderAlbum();
-    } else {
-      var p = DB.photos.find(x => x.id === pId);
-      if (p) window.open(p.blob_key, '_blank');
-    }
+      if (albumState.selected.has(pId)) albumState.selected.delete(pId); else albumState.selected.add(pId); renderAlbum();
+    } else { var p = DB.photos.find(x => x.id === pId); if (p) window.open(p.blob_key, '_blank'); }
   });
-
   $('#btnMulti').addEventListener('click', function() {
-    albumState.selectMode = !albumState.selectMode;
-    albumState.selected.clear(); renderAlbum();
+    albumState.selectMode = !albumState.selectMode; albumState.selected.clear(); renderAlbum();
   });
 }
 
@@ -1372,149 +1226,67 @@ function renderMembers() {
   var tbody = $('#memberBody');
   tbody.innerHTML = DB.members.map(function(m) {
     var acts = canEditMember(m) ? '<button class="btn ghost sm" data-act="edit" data-id="'+m.id+'">编辑</button>' : '';
-    return '<tr>' +
-      '<td>'+esc(m.name)+'</td>' +
-      '<td>'+esc(m.group_name)+'</td>' +
-      '<td>'+esc(m.role)+'</td>' +
-      '<td>'+esc(m.school||'-')+'</td>' +
-      '<td>'+esc(m.college||'-')+'</td>' +
-      '<td>'+esc(m.grade||'-')+'</td>' +
-      '<td>'+esc(m.major||'-')+'</td>' +
-      '<td>'+esc(m.student_id||'-')+'</td>' +
-      '<td>'+esc(m.ethnicity||'-')+'</td>' +
-      '<td>'+esc(m.political||'-')+'</td>' +
-      '<td>'+esc(m.id_card||'-')+'</td>' +
-      '<td>'+esc(m.phone||'-')+'</td>' +
-      '<td>'+esc(m.emergency_name||'-')+'</td>' +
-      '<td>'+esc(m.emergency_phone||'-')+'</td>' +
-      '<td><div class="row-actions">'+acts+'</div></td>' +
-    '</tr>';
+    return '<tr><td>'+esc(m.name)+'</td><td>'+esc(m.group_name)+'</td><td>'+esc(m.role)+'</td><td>'+esc(m.school||'-')+'</td><td>'+esc(m.college||'-')+'</td><td>'+esc(m.grade||'-')+'</td><td>'+esc(m.major||'-')+'</td><td>'+esc(m.student_id||'-')+'</td><td>'+esc(m.ethnicity||'-')+'</td><td>'+esc(m.political||'-')+'</td><td>'+esc(m.id_card||'-')+'</td><td>'+esc(m.phone||'-')+'</td><td>'+esc(m.emergency_name||'-')+'</td><td>'+esc(m.emergency_phone||'-')+'</td><td><div class="row-actions">'+acts+'</div></td></tr>';
   }).join('');
-  
   tbody.querySelectorAll('button[data-act="edit"]').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var m = DB.members.find(x => x.id === btn.dataset.id);
-      if (canEditMember(m)) openMemberModal(m);
-    });
+    btn.addEventListener('click', function() { var m = DB.members.find(x => x.id === btn.dataset.id); if (canEditMember(m)) openMemberModal(m); });
   });
-
   renderFiles();
 }
-
-function bindMemberEvents() {
-  $('#btnExportMembers').addEventListener('click', function() { toast('导出功能暂略'); });
-}
+function bindMemberEvents() { $('#btnExportMembers').addEventListener('click', function() { toast('导出功能暂略'); }); }
 
 /* ---------- 聊天模块 ---------- */
 function renderChat() {
-  // 补全私聊会话
   DB.messages.forEach(m => {
     if (m.conversation_id && m.conversation_id.startsWith('private_')) {
-      var convId = m.conversation_id;
-      if (!DB.conversations.find(c => c.id === convId)) {
-        var otherId = m.user_id;
-        if (otherId !== me.id) {
-          DB.conversations.push({ id: convId, type: 'private', member_ids: [me.id, otherId] });
-        }
-      }
+      var convId = m.conversation_id; if (!DB.conversations.find(c => c.id === convId)) { var otherId = m.user_id; if (otherId !== me.id) DB.conversations.push({ id: convId, type: 'private', member_ids: [me.id, otherId] }); }
     }
   });
-
-  var html = '';
-  
-  var groups = DB.conversations.filter(c => c.type === 'group' || !c.type);
+  var html = ''; var groups = DB.conversations.filter(c => c.type === 'group' || !c.type);
   html += '<div class="side-sec">群聊</div>';
   groups.forEach(function(c) {
-    var isUnread = false;
-    var lastRead = chatReadTimes[c.id] || 0;
-    var msgs = DB.messages.filter(m => m.conversation_id === c.id);
+    var isUnread = false; var lastRead = chatReadTimes[c.id] || 0; var msgs = DB.messages.filter(m => m.conversation_id === c.id);
     if (msgs.length > 0 && new Date(msgs[msgs.length - 1].created_at).getTime() > lastRead) isUnread = true;
-    
-    html += '<div class="side-item '+(c.id===currentChatId?'active':'')+'" data-cid="'+c.id+'"><div class="si-txt"><div class="si-name">'+esc(c.name || '支队群聊')+'</div></div>' +
-      (isUnread ? '<span class="red-dot" style="margin-left:auto"></span>' : '') + '</div>';
+    html += '<div class="side-item '+(c.id===currentChatId?'active':'')+'" data-cid="'+c.id+'"><div class="si-txt"><div class="si-name">'+esc(c.name || '支队群聊')+'</div></div>' + (isUnread ? '<span class="red-dot" style="margin-left:auto"></span>' : '') + '</div>';
   });
-
   var privates = DB.conversations.filter(c => c.type === 'private' && (c.member_ids || []).includes(me.id));
   html += '<div class="side-sec">私聊</div>';
-  if (privates.length === 0) {
-    html += '<div class="sub" style="padding:8px;font-size:12px">暂无私聊</div>';
-  }
+  if (privates.length === 0) html += '<div class="sub" style="padding:8px;font-size:12px">暂无私聊</div>';
   privates.forEach(function(c) {
-    var otherId = (c.member_ids || []).find(id => id !== me.id);
-    var other = DB.members.find(m => m.user_id === otherId);
-    var name = other ? other.name : '未知用户';
+    var otherId = (c.member_ids || []).find(id => id !== me.id); var other = DB.members.find(m => m.user_id === otherId); var name = other ? other.name : '未知用户';
     var av = other && other.avatar_url ? JSON.parse(other.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
-    
-    var isUnread = false;
-    var lastRead = chatReadTimes[c.id] || 0;
-    var msgs = DB.messages.filter(m => m.conversation_id === c.id);
+    var isUnread = false; var lastRead = chatReadTimes[c.id] || 0; var msgs = DB.messages.filter(m => m.conversation_id === c.id);
     if (msgs.length > 0 && new Date(msgs[msgs.length - 1].created_at).getTime() > lastRead) isUnread = true;
-    
-    html += '<div class="side-item '+(c.id===currentChatId?'active':'')+'" data-cid="'+c.id+'">' + 
-      avatarHTML(name, av, 'avatar-sm') +
-      '<div class="si-txt"><div class="si-name">'+esc(name)+'</div></div>' + 
-      (isUnread ? '<span class="red-dot" style="margin-left:auto"></span>' : '') + '</div>';
+    html += '<div class="side-item '+(c.id===currentChatId?'active':'')+'" data-cid="'+c.id+'">' + avatarHTML(name, av, 'avatar-sm') + '<div class="si-txt"><div class="si-name">'+esc(name)+'</div></div>' + (isUnread ? '<span class="red-dot" style="margin-left:auto"></span>' : '') + '</div>';
   });
-  
   $('#chatSideList').innerHTML = html;
   
   var msgs = DB.messages.filter(function(m) { return m.conversation_id === currentChatId; });
   $('#chatLog').innerHTML = msgs.map(function(m) {
-    var sender = DB.members.find(x => x.user_id === m.user_id);
-    var av = sender && sender.avatar_url ? JSON.parse(sender.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
-    var isMine = m.user_id === me.id;
-
-    return '<div class="msg '+(isMine?'mine':'')+'">' + 
-      avatarHTML(m.user_name, av, 'avatar-sm') +
-      '<div class="bubble-wrap"><div class="msg-head">'+esc(m.user_name)+' · '+fmtTime(m.created_at)+'</div><div class="bubble">'+esc(m.text)+'</div></div></div>';
+    var sender = DB.members.find(x => x.user_id === m.user_id); var av = sender && sender.avatar_url ? JSON.parse(sender.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''}; var isMine = m.user_id === me.id;
+    return '<div class="msg '+(isMine?'mine':'')+'">' + avatarHTML(m.user_name, av, 'avatar-sm') + '<div class="bubble-wrap"><div class="msg-head">'+esc(m.user_name)+' · '+fmtTime(m.created_at)+'</div><div class="bubble">'+esc(m.text)+'</div></div></div>';
   }).join('');
   $('#chatLog').scrollTop = $('#chatLog').scrollHeight;
 }
 function bindChatEvents() {
-  $('#chatSideList').addEventListener('click', function(e) {
-    var item = e.target.closest('.side-item'); if (item) { currentChatId = item.dataset.cid; renderChat(); markChatRead(); }
-  });
+  $('#chatSideList').addEventListener('click', function(e) { var item = e.target.closest('.side-item'); if (item) { currentChatId = item.dataset.cid; renderChat(); markChatRead(); } });
   $('#btnSend').addEventListener('click', async function() {
-    var text = $('#chatText').value.trim(); if (!text) return;
-    $('#chatText').value = '';
+    var text = $('#chatText').value.trim(); if (!text) return; $('#chatText').value = '';
     await db.from('messages').insert({ conversation_id: currentChatId, user_id: me.id, user_name: me.name, text: text });
-    
     if (currentChatId.startsWith('private_')) {
       var existing = DB.conversations.find(c => c.id === currentChatId);
-      if (!existing) {
-        var targetId = currentChatId.replace('private_', '').split('_').find(id => id !== me.id);
-        await db.from('conversations').insert({
-          id: currentChatId, type: 'private', name: '私聊', member_ids: [me.id, targetId], created_by: me.id
-        });
-      }
+      if (!existing) { var targetId = currentChatId.replace('private_', '').split('_').find(id => id !== me.id); await db.from('conversations').insert({ id: currentChatId, type: 'private', name: '私聊', member_ids: [me.id, targetId], created_by: me.id }); }
     }
-    
     await fetchAllData(); renderChat(); markChatRead();
   });
-  
   $('#btnNewPrivate').addEventListener('click', function() {
-    var others = DB.members.filter(m => m.user_id && m.user_id !== me.id);
-    if (!others.length) return toast('暂无其他成员');
-    openModal('<h2>发起私聊</h2>' +
-      '<div class="field"><label>选择成员</label><div class="pick-list">' +
-      others.map(u => '<label class="pick-item"><input type="radio" name="pUser" value="'+u.user_id+'" /> '+esc(u.name)+'</label>').join('') +
-      '</div></div>' +
-      '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="pSave">开始聊天</button></div>');
+    var others = DB.members.filter(m => m.user_id && m.user_id !== me.id); if (!others.length) return toast('暂无其他成员');
+    openModal('<h2>发起私聊</h2><div class="field"><label>选择成员</label><div class="pick-list">' + others.map(u => '<label class="pick-item"><input type="radio" name="pUser" value="'+u.user_id+'" /> '+esc(u.name)+'</label>').join('') + '</div></div><div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="pSave">开始聊天</button></div>');
     $('#pSave').addEventListener('click', async function() {
-      var sel = $('input[name="pUser"]:checked');
-      if (!sel) return toast('请选择一位成员');
-      var targetId = sel.value;
-      var convId = 'private_' + [me.id, targetId].sort().join('_');
-      
-      var existing = DB.conversations.find(c => c.id === convId);
-      if (!existing) {
-        await db.from('conversations').insert({
-          id: convId, type: 'private', name: '私聊', member_ids: [me.id, targetId], created_by: me.id
-        });
-        await fetchAllData();
-      }
-      currentChatId = convId;
-      closeModal(); renderChat(); markChatRead();
+      var sel = $('input[name="pUser"]:checked'); if (!sel) return toast('请选择一位成员');
+      var targetId = sel.value; var convId = 'private_' + [me.id, targetId].sort().join('_');
+      if (!DB.conversations.find(c => c.id === convId)) { await db.from('conversations').insert({ id: convId, type: 'private', name: '私聊', member_ids: [me.id, targetId], created_by: me.id }); await fetchAllData(); }
+      currentChatId = convId; closeModal(); renderChat(); markChatRead();
     });
   });
 }
@@ -1522,47 +1294,23 @@ function bindChatEvents() {
 /* ---------- 邀请码管理 ---------- */
 function openInviteModal() {
   if (!isLeader()) return;
-  openModal('<h2>邀请码管理</h2><div class="doc-list">' + DB.inviteCodes.map(function(c) {
-    return '<div class="doc-item"><div class="invite-code">'+c.code+'</div><span style="margin-left:auto">'+(c.used?'已用':'可用')+'</span></div>';
-  }).join('') + '</div><div class="modal-actions"><button class="btn primary" id="genCode">生成新码</button></div>');
+  openModal('<h2>邀请码管理</h2><div class="doc-list">' + DB.inviteCodes.map(function(c) { return '<div class="doc-item"><div class="invite-code">'+c.code+'</div><span style="margin-left:auto">'+(c.used?'已用':'可用')+'</span></div>'; }).join('') + '</div><div class="modal-actions"><button class="btn primary" id="genCode">生成新码</button></div>');
   $('#genCode').addEventListener('click', async function() {
-    var code = 'TJ-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-    await db.from('invite_codes').insert({ code: code, role: 'member', used: false, voided: false });
-    await fetchAllData(); openInviteModal(); toast('已生成：' + code);
+    var code = 'TJ-' + Math.random().toString(36).substring(2, 8).toUpperCase(); await db.from('invite_codes').insert({ code: code, role: 'member', used: false, voided: false }); await fetchAllData(); openInviteModal(); toast('已生成：' + code);
   });
 }
 
 /* ---------- 资料编辑 ---------- */
 function openMemberModal(member) {
   if (!canEditMember(member)) return toast('无权限编辑');
-  var isSelf = member.user_id === me.id;
-  var tempAvatar = member.avatar_url ? JSON.parse(member.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
-
-  var avatarPickerHTML = isSelf ? (
-    '<div class="avatar-picker" style="margin-bottom:16px" id="avatarPickerArea">' +
-      '<div class="ap-left"><div class="avatar avatar-xl" id="pfPreview"></div></div>' +
-      '<div class="ap-right">' +
-        '<label class="btn sm">上传图片（可裁剪）<input type="file" id="pfFile" accept="image/*" hidden /></label>' +
-        '<div class="ap-label">或挑一个定制头像</div>' +
-        '<div class="ap-colors" id="pfColors"></div>' +
-        '<div class="ap-emojis" id="pfEmojis"></div>' +
-      '</div>' +
-    '</div>'
-  ) : '';
-
-  var nameField = isSelf 
-    ? '<input id="pfName" value="'+esc(member.name)+'" />' 
-    : '<input id="pfName" value="'+esc(member.name)+'" readonly style="background:#f5f7fb;cursor:not-allowed" />';
-
-  openModal(
-    '<h2>' + (isSelf ? '我的资料' : '编辑成员信息') + '</h2>' +
-    avatarPickerHTML +
+  var isSelf = member.user_id === me.id; var tempAvatar = member.avatar_url ? JSON.parse(member.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
+  var avatarPickerHTML = isSelf ? ('<div class="avatar-picker" style="margin-bottom:16px" id="avatarPickerArea"><div class="ap-left"><div class="avatar avatar-xl" id="pfPreview"></div></div><div class="ap-right"><label class="btn sm">上传图片（可裁剪）<input type="file" id="pfFile" accept="image/*" hidden /></label><div class="ap-label">或挑一个定制头像</div><div class="ap-colors" id="pfColors"></div><div class="ap-emojis" id="pfEmojis"></div></div></div>') : '';
+  var nameField = isSelf ? '<input id="pfName" value="'+esc(member.name)+'" />' : '<input id="pfName" value="'+esc(member.name)+'" readonly style="background:#f5f7fb;cursor:not-allowed" />';
+  openModal('<h2>' + (isSelf ? '我的资料' : '编辑成员信息') + '</h2>' + avatarPickerHTML +
     '<div class="grid2">' +
       '<div class="field"><label>姓名 ' + (isSelf ? '*' : '(不可修改)') + '</label>' + nameField + '</div>' +
       '<div class="field"><label>组别</label><select id="pfGroup">'+GROUPS.map(g => '<option '+(g===member.group_name?'selected':'')+'>'+g+'</option>').join('')+'</select></div>' +
-      '<div class="field"><label>角色</label>' + 
-        (canChangeRole() ? '<select id="pfRole">'+ROLES.map(r => '<option '+(r===member.role?'selected':'')+'>'+r+'</option>').join('')+'</select>' : '<input value="'+esc(member.role)+'" readonly style="background:#f5f7fb" />') +
-      '</div>' +
+      '<div class="field"><label>角色</label>' + (canChangeRole() ? '<select id="pfRole">'+ROLES.map(r => '<option '+(r===member.role?'selected':'')+'>'+r+'</option>').join('')+'</select>' : '<input value="'+esc(member.role)+'" readonly style="background:#f5f7fb" />') + '</div>' +
       '<div class="field"><label>学校</label><input id="pfSchool" value="'+esc(member.school||'')+'" /></div>' +
       '<div class="field"><label>学院</label><input id="pfCollege" value="'+esc(member.college||'')+'" /></div>' +
       '<div class="field"><label>年级</label><input id="pfGrade" value="'+esc(member.grade||'')+'" /></div>' +
@@ -1576,102 +1324,44 @@ function openMemberModal(member) {
       '<div class="field"><label>紧急联系方式</label><input id="pfEmergencyPhone" value="'+esc(member.emergency_phone||'')+'" /></div>' +
       '<div class="field" style="grid-column:1/-1"><label>备注</label><input id="pfNote" value="'+esc(member.note||'')+'" /></div>' +
     '</div>' +
-    '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="pfSave">保存</button></div>',
-    { wide: true }
-  );
+    '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="pfSave">保存</button></div>', { wide: true });
 
   if (isSelf) {
-    var preview = $('#pfPreview');
-    var paint = function() { setAvatar(preview, tempAvatar, $('#pfName').value.trim() || '未知'); };
-    paint();
-
+    var preview = $('#pfPreview'); var paint = function() { setAvatar(preview, tempAvatar, $('#pfName').value.trim() || '未知'); }; paint();
     $('#pfColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot-color" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
     $('#pfEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
-
-    $('#pfColors').addEventListener('click', function(e) {
-      var b = e.target.closest('.dot-color'); if (!b) return;
-      tempAvatar = { kind:'gen', color:b.dataset.color, emoji:(tempAvatar && tempAvatar.emoji) || '' }; paint();
-    });
-    $('#pfEmojis').addEventListener('click', function(e) {
-      var b = e.target.closest('.emo'); if (!b) return;
-      tempAvatar = { kind:'gen', color:(tempAvatar && tempAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji }; paint();
-    });
-    $('#pfFile').addEventListener('change', function(e) {
-      var f = e.target.files[0]; e.target.value = ''; if (!f) return;
-      openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); });
-    });
+    $('#pfColors').addEventListener('click', function(e) { var b = e.target.closest('.dot-color'); if (!b) return; tempAvatar = { kind:'gen', color:b.dataset.color, emoji:(tempAvatar && tempAvatar.emoji) || '' }; paint(); });
+    $('#pfEmojis').addEventListener('click', function(e) { var b = e.target.closest('.emo'); if (!b) return; tempAvatar = { kind:'gen', color:(tempAvatar && tempAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji }; paint(); });
+    $('#pfFile').addEventListener('change', function(e) { var f = e.target.files[0]; e.target.value = ''; if (!f) return; openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); }); });
     $('#pfName').addEventListener('input', paint);
   }
 
   $('#pfSave').addEventListener('click', async function() {
-    var payloadName = $('#pfName').value.trim();
-    if (!payloadName) return toast('请填写姓名');
-    
+    var payloadName = $('#pfName').value.trim(); if (!payloadName) return toast('请填写姓名');
     $('#pfSave').textContent = '保存中...'; $('#pfSave').disabled = true;
-
-    var updateData = {
-      group_name: $('#pfGroup').value,
-      school: $('#pfSchool').value.trim(),
-      college: $('#pfCollege').value.trim(),
-      grade: $('#pfGrade').value.trim(),
-      major: $('#pfMajor').value.trim(),
-      student_id: $('#pfStudentId').value.trim(),
-      ethnicity: $('#pfEthnicity').value.trim(),
-      political: $('#pfPolitical').value.trim(),
-      id_card: $('#pfIdCard').value.trim(),
-      phone: $('#pfPhone').value.trim(),
-      emergency_name: $('#pfEmergencyName').value.trim(),
-      emergency_phone: $('#pfEmergencyPhone').value.trim(),
-      note: $('#pfNote').value.trim()
-    };
-
-    if (isSelf) {
-      updateData.name = payloadName;
-      updateData.avatar_url = JSON.stringify(tempAvatar);
-    }
-
-    if (canChangeRole() && $('#pfRole')) {
-      updateData.role = $('#pfRole').value;
-    }
-
+    var updateData = { group_name: $('#pfGroup').value, school: $('#pfSchool').value.trim(), college: $('#pfCollege').value.trim(), grade: $('#pfGrade').value.trim(), major: $('#pfMajor').value.trim(), student_id: $('#pfStudentId').value.trim(), ethnicity: $('#pfEthnicity').value.trim(), political: $('#pfPolitical').value.trim(), id_card: $('#pfIdCard').value.trim(), phone: $('#pfPhone').value.trim(), emergency_name: $('#pfEmergencyName').value.trim(), emergency_phone: $('#pfEmergencyPhone').value.trim(), note: $('#pfNote').value.trim() };
+    if (isSelf) { updateData.name = payloadName; updateData.avatar_url = JSON.stringify(tempAvatar); }
+    if (canChangeRole() && $('#pfRole')) { updateData.role = $('#pfRole').value; }
     var { error } = await db.from('members').update(updateData).eq('id', member.id);
-
-    if (error) {
-      toast('保存失败: ' + error.message);
-      $('#pfSave').textContent = '保存'; $('#pfSave').disabled = false;
-      return;
-    }
-
-    if (isSelf) {
-      me.name = payloadName;
-      me.avatar = tempAvatar;
-      if (updateData.role) me.role = updateData.role;
-    }
-    
-    await fetchAllData();
-    refreshTopbar();
-    closeModal();
-    toast('资料已更新 ✅');
-    renderMembers();
+    if (error) { toast('保存失败: ' + error.message); $('#pfSave').textContent = '保存'; $('#pfSave').disabled = false; return; }
+    if (isSelf) { me.name = payloadName; me.avatar = tempAvatar; if (updateData.role) me.role = updateData.role; }
+    await fetchAllData(); refreshTopbar(); closeModal(); toast('资料已更新 ✅'); renderMembers();
   });
 }
 
 /* ---------- 初始化流程 ---------- */
 async function init() {
   bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindFileEvents(); bindChatEvents(); bindMultiBarEvents();
-  bindAvatarPicker();
-  buildFileCatSelect();
+  bindAvatarPicker(); buildFileCatSelect();
 
   const { data: { session } } = await db.auth.getSession();
   if (session) {
     await fetchAllData();
     const myMember = DB.members.find(m => m.user_id === session.user.id);
     if (myMember) {
-      var avatarData = null;
-      if (myMember.avatar_url) { try { avatarData = JSON.parse(myMember.avatar_url); } catch(e){} }
+      var avatarData = null; if (myMember.avatar_url) { try { avatarData = JSON.parse(myMember.avatar_url); } catch(e){} }
       me = { id: session.user.id, name: myMember.name, role: myMember.role, group_name: myMember.group_name, avatar: avatarData || {kind:'gen', color:'#3b6ef5', emoji:''} };
-      startApp();
-      return;
+      startApp(); return;
     }
   }
   $('#authView').hidden = false; $('#appView').hidden = true;
