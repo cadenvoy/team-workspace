@@ -257,7 +257,7 @@ main{padding:16px 14px 90px}.topbar{padding:9px 12px;gap:8px}
       <button class="nav-btn active" data-view="tasks">工作中心 <span id="dotTasks" class="red-dot" hidden></span></button>
       <button class="nav-btn" data-view="album">支队相册</button>
       <button class="nav-btn" data-view="members">档案中心</button>
-      <button class="nav-btn" data-view="chat">信息中心</button>
+      <button class="nav-btn" data-view="chat">信息中心 <span id="dotChat" class="red-dot" hidden></span></button>
     </nav>
     <div class="user-box">
       <span id="topAvatar"></span>
@@ -350,10 +350,12 @@ main{padding:16px 14px 90px}.topbar{padding:9px 12px;gap:8px}
         </table>
       </div>
       <div class="view-head mt">
-        <div><h2>文件资料</h2><p class="sub">行前知情同意书、保险凭证、报销凭证等材料统一归档</p></div>
+        <div><h2>文件资料</h2><p class="sub">统一归档各类材料</p></div>
         <div class="view-actions">
-          <select class="sel" id="fileCatSelect"></select>
-          <label class="btn primary">上传文件<input type="file" id="fileInput" multiple hidden /></label>
+          <select class="sel" id="fileFilterSelect">
+            <option value="all">全部资料</option>
+          </select>
+          <button class="btn primary" id="btnOpenUploadFile">上传文件</button>
         </div>
       </div>
       <div class="file-list" id="fileList"></div>
@@ -385,7 +387,7 @@ main{padding:16px 14px 90px}.topbar{padding:9px 12px;gap:8px}
   <span class="cnt" id="multiCount">已选 0 项</span>
   <button class="btn sm" id="multiAll">全选</button>
   <button class="btn sm" id="multiDownload">下载</button>
-  <button class="btn sm" id="multiDelete">删除</button>
+  <button class="btn sm del" id="multiDelete">删除</button>
   <button class="btn sm" id="multiCancel">取消</button>
 </div>
 
@@ -409,9 +411,12 @@ let regAvatar = null;
 let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
 let taskFilter = { status:'all', group:'all' };
+let fileFilter = 'all'; // 文件分类过滤
 
+// 通知缓存
 let lastReadTasks = parseInt(localStorage.getItem('lastReadTasks') || '0');
 let lastReadDocs = parseInt(localStorage.getItem('lastReadDocs') || '0');
+let lastReadChat = parseInt(localStorage.getItem('lastReadChat') || '0');
 
 const GROUPS = ['学术组','宣传组','设计组','建筑组'];
 const ROLES = ['支队长','副支队长','支队员'];
@@ -590,6 +595,7 @@ async function fetchAllData() {
     if (photosRes.error) console.error("photos:", photosRes.error);
     if (docsRes.error) console.error("docs:", docsRes.error);
     if (filesRes.error) console.error("files:", filesRes.error);
+    if (msgsRes.error) console.error("messages:", msgsRes.error);
 
     DB.tasks = tasksRes.data || [];
     DB.members = membersRes.data || [];
@@ -607,6 +613,36 @@ async function fetchAllData() {
   }
 }
 
+// 只拉取聊天数据（用于轮询）
+async function pollChatData() {
+  if (!me) return;
+  try {
+    const [msgsRes, convsRes] = await Promise.all([
+      db.from('messages').select('*').order('created_at', { ascending: true }),
+      db.from('conversations').select('*')
+    ]);
+    if (!msgsRes.error) DB.messages = msgsRes.data || [];
+    if (!convsRes.error) DB.conversations = convsRes.data || [];
+
+    // 检测未读新消息
+    var hasNewChat = false;
+    DB.messages.forEach(m => {
+      if (new Date(m.created_at).getTime() > lastReadChat && m.user_id !== me.id) {
+        hasNewChat = true;
+      }
+    });
+
+    if (hasNewChat && currentView !== 'chat') {
+      $('#dotChat').hidden = false;
+    }
+
+    if (currentView === 'chat') {
+      renderChat();
+      markChatRead();
+    }
+  } catch (err) {}
+}
+
 function checkNotifications() {
   if (!me) return;
   var hasNewTasks = DB.tasks.some(function(t) {
@@ -617,19 +653,11 @@ function checkNotifications() {
     return new Date(d.created_at).getTime() > lastReadDocs;
   });
 
-  if (hasNewTasks) {
-    $('#dotTasks').hidden = false;
-    $('#unreadTasksText').hidden = false;
-  } else {
-    $('#dotTasks').hidden = true;
-    $('#unreadTasksText').hidden = true;
-  }
+  if (hasNewTasks) { $('#dotTasks').hidden = false; $('#unreadTasksText').hidden = false; } 
+  else { $('#dotTasks').hidden = true; $('#unreadTasksText').hidden = true; }
   
-  if (hasNewDocs) {
-    $('#unreadDocsText').hidden = false;
-  } else {
-    $('#unreadDocsText').hidden = true;
-  }
+  if (hasNewDocs) { $('#unreadDocsText').hidden = false; } 
+  else { $('#unreadDocsText').hidden = true; }
 
   if (hasNewTasks || hasNewDocs) {
     $('#noticeBox').hidden = false;
@@ -642,19 +670,9 @@ function checkNotifications() {
   }
 }
 
-function markTasksRead() {
-  lastReadTasks = Date.now();
-  localStorage.setItem('lastReadTasks', lastReadTasks);
-  $('#dotTasks').hidden = true;
-  $('#unreadTasksText').hidden = true;
-  checkNotifications();
-}
-function markDocsRead() {
-  lastReadDocs = Date.now();
-  localStorage.setItem('lastReadDocs', lastReadDocs);
-  $('#unreadDocsText').hidden = true;
-  checkNotifications();
-}
+function markTasksRead() { lastReadTasks = Date.now(); localStorage.setItem('lastReadTasks', lastReadTasks); checkNotifications(); }
+function markDocsRead() { lastReadDocs = Date.now(); localStorage.setItem('lastReadDocs', lastReadDocs); checkNotifications(); }
+function markChatRead() { lastReadChat = Date.now(); localStorage.setItem('lastReadChat', lastReadChat); $('#dotChat').hidden = true; }
 
 /* ---------- 登录 / 注册 ---------- */
 function bindAuthTabs() {
@@ -734,6 +752,9 @@ function bindAuthForms() {
 function startApp() {
   $('#authView').hidden = true; $('#appView').hidden = false;
   refreshTopbar(); buildGroupFilter(); switchView(currentView);
+  
+  // 启动聊天轮询（每 5 秒）
+  setInterval(pollChatData, 5000);
 }
 function refreshTopbar() {
   if (!me) return;
@@ -767,6 +788,7 @@ function switchView(v) {
   renderCurrentView();
 
   if (v === 'tasks') { markTasksRead(); markDocsRead(); }
+  if (v === 'chat') { markChatRead(); }
 }
 function renderCurrentView() {
   if (!me) return;
@@ -776,7 +798,7 @@ function renderCurrentView() {
   else if (currentView === 'chat') renderChat();
 }
 
-/* ---------- 任务模块（支持多选负责人） ---------- */
+/* ---------- 任务模块 ---------- */
 function buildGroupFilter() {
   var sel = $('#taskGroupFilter'); sel.innerHTML = '<option value="all">全部组别</option>' + GROUPS.map(function(g) { return '<option value="'+g+'">'+g+'</option>'; }).join('');
 }
@@ -789,16 +811,21 @@ function renderTasks() {
   
   list.innerHTML = items.map(function(t) {
     var meta = t.status === 'done' ? {label:'已完成', cls:'ok'} : t.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
-    
-    // 判断当前用户是否为负责人 (owner 可能是用逗号分隔的多个名字)
     var isOwner = (t.owner || '').split(',').includes(me.name);
-
+    
     var acts = '<button class="btn ghost sm" data-act="detail" data-id="'+t.id+'">详情</button>';
-    // 只有负责人才能完成任务
-    if (t.status === 'todo' && isOwner) acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
+    
+    // 负责人完成任务
+    if (t.status === 'todo' && isOwner) {
+      acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
+    }
+    // 管理员批复
+    if (t.status === 'pending' && isManager()) {
+      acts += '<button class="btn primary sm" data-act="review" data-id="'+t.id+'">批复</button>';
+    }
+    // 删除
     if (isManager()) acts += '<button class="btn danger sm" data-act="del" data-id="'+t.id+'">删除</button>';
     
-    // 高亮判断
     var isHighlight = (t.group_name === me.group_name || t.group_name === '全部组别') && t.status !== 'done';
     
     return '<article class="task-card '+(t.status==='done'?'is-done':'')+' '+(isHighlight?'highlight':'')+'">' +
@@ -818,13 +845,34 @@ function bindTaskEvents() {
     
     if (btn.dataset.act === 'submit') {
       await db.from('tasks').update({ status: 'pending', submitted_by: me.name, submitted_at: new Date().toISOString() }).eq('id', id);
-      toast('已提交'); await fetchAllData(); renderTasks();
+      toast('已提交，等待批复'); await fetchAllData(); renderTasks();
     }
+    
+    if (btn.dataset.act === 'review') {
+      openModal(
+        '<h2>批复任务</h2>' +
+        '<p>任务：' + esc(task.title) + '</p>' +
+        '<div class="modal-actions">' +
+          '<button class="btn danger" id="btnReject">驳回</button>' +
+          '<button class="btn primary" id="btnApprove">通过</button>' +
+        '</div>'
+      );
+      $('#btnApprove').addEventListener('click', async function() {
+        await db.from('tasks').update({ status: 'done', done_by: me.name, done_at: new Date().toISOString() }).eq('id', id);
+        closeModal(); toast('已批复通过'); await fetchAllData(); renderTasks();
+      });
+      $('#btnReject').addEventListener('click', async function() {
+        await db.from('tasks').update({ status: 'todo', reject_reason: '管理员驳回' }).eq('id', id);
+        closeModal(); toast('已驳回'); await fetchAllData(); renderTasks();
+      });
+    }
+    
     if (btn.dataset.act === 'del') {
       if (!confirm('确定删除？')) return;
       await db.from('tasks').delete().eq('id', id);
       toast('已删除'); await fetchAllData(); renderTasks();
     }
+    
     if (btn.dataset.act === 'detail') {
       var meta = task.status === 'done' ? {label:'已完成', cls:'ok'} : task.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
       openModal(
@@ -867,14 +915,8 @@ function bindTaskEvents() {
       if (!selectedOwners) return toast('请至少选择一位负责人');
 
       await db.from('tasks').insert({ 
-        title: title, 
-        description: $('#tDesc').value.trim(), 
-        group_name: $('#tGroup').value, 
-        owner: selectedOwners, 
-        due_date: $('#tDue').value, 
-        status: 'todo', 
-        created_by: me.id, 
-        creator_name: me.name 
+        title: title, description: $('#tDesc').value.trim(), group_name: $('#tGroup').value, 
+        owner: selectedOwners, due_date: $('#tDue').value, status: 'todo', created_by: me.id, creator_name: me.name 
       });
       closeModal(); toast('已发布'); await fetchAllData(); renderTasks();
     });
@@ -898,29 +940,34 @@ function bindDocEvents() {
     toast('正在上传到云端...');
     for (var i = 0; i < files.length; i++) {
       var f = files[i]; 
-      var ext = f.name.match(/\.[^.]+$/)?.[0] || ''; // 提取后缀名，比如 .docx
-      // 避开特殊字符
+      var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
       var path = 'docs/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
       
       try {
         var { error } = await db.storage.from('media').upload(path, f);
         if (error) throw error;
         var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        // 这里存入真实的文件名 f.name 供显示
         var { error: dbErr } = await db.from('docs').insert({ name: f.name, size: f.size, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
         if (dbErr) throw dbErr;
-      } catch (err) {
-        alert('上传失败: ' + err.message);
-      }
+      } catch (err) { alert('上传失败: ' + err.message); }
     }
     e.target.value = ''; toast('上传完毕'); await fetchAllData(); renderDocs();
   });
 }
 
+// 档案文件列表及筛选
+function buildFileCatSelect() {
+  var filterHtml = '<option value="all">全部资料</option>' + FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
+  $('#fileFilterSelect').innerHTML = filterHtml;
+}
 function renderFiles() {
   var box = $('#fileList');
-  if (!DB.files.length) { box.innerHTML = '<div class="empty">暂无归档文件</div>'; return; }
-  box.innerHTML = DB.files.map(function(f) {
+  var filtered = DB.files;
+  if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
+  
+  if (!filtered.length) { box.innerHTML = '<div class="empty">暂无归档文件</div>'; return; }
+  
+  box.innerHTML = filtered.map(function(f) {
     return '<div class="file-item">' +
       '<div class="file-icon">📎</div>' +
       '<div class="file-info">' +
@@ -936,28 +983,46 @@ function renderFiles() {
     '</div>';
   }).join('');
 }
-
 function bindFileEvents() {
-  $('#fileInput').addEventListener('change', async function(e) {
-    var files = e.target.files; if (!files.length) return;
-    var cat = $('#fileCatSelect').value;
-    toast('正在上传档案文件...');
-    for (var i = 0; i < files.length; i++) {
-      var f = files[i]; 
-      var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
-      var path = 'files/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
+  // 筛选变动
+  $('#fileFilterSelect').addEventListener('change', function(e) {
+    fileFilter = e.target.value;
+    renderFiles();
+  });
+
+  // 点开上传弹窗
+  $('#btnOpenUploadFile').addEventListener('click', function() {
+    var catOptions = FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
+    openModal(
+      '<h2>上传文件资料</h2>' +
+      '<div class="field"><label>选择类别</label><select id="uploadCat">'+catOptions+'</select></div>' +
+      '<div class="field"><label>选择文件</label><input type="file" id="uploadFileInput" multiple /></div>' +
+      '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="btnDoUpload">上传</button></div>'
+    );
+    $('#btnDoUpload').addEventListener('click', async function() {
+      var files = $('#uploadFileInput').files;
+      if (!files.length) return toast('请选择文件');
+      var cat = $('#uploadCat').value;
       
-      try {
-        var { error } = await db.storage.from('media').upload(path, f);
-        if (error) throw error;
-        var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        var { error: dbErr } = await db.from('files').insert({ 
-          name: f.name, size: f.size, category: cat, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name 
-        });
-        if (dbErr) throw dbErr;
-      } catch (err) { alert('上传失败: ' + err.message); }
-    }
-    e.target.value = ''; toast('档案文件上传完毕'); await fetchAllData(); renderFiles();
+      $('#btnDoUpload').textContent = '上传中...'; $('#btnDoUpload').disabled = true;
+      
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i]; 
+        var ext = f.name.match(/\.[^.]+$/)?.[0] || '';
+        var path = 'files/' + Date.now() + '_' + Math.random().toString(36).substring(2, 8) + ext;
+        
+        try {
+          var { error } = await db.storage.from('media').upload(path, f);
+          if (error) throw error;
+          var { data: urlData } = db.storage.from('media').getPublicUrl(path);
+          var { error: dbErr } = await db.from('files').insert({ 
+            name: f.name, size: f.size, category: cat, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name 
+          });
+          if (dbErr) throw dbErr;
+        } catch (err) { alert('上传失败: ' + err.message); }
+      }
+      closeModal(); toast('文件上传完毕'); await fetchAllData(); renderFiles();
+    });
   });
 }
 
@@ -1190,15 +1255,11 @@ function renderChat() {
   DB.messages.forEach(m => {
     if (m.conversation_id && m.conversation_id.startsWith('private_')) {
       var convId = m.conversation_id;
-      // 如果本地没有这个会话
       if (!DB.conversations.find(c => c.id === convId)) {
         var otherId = m.user_id;
         if (otherId !== me.id) {
-          // 临时构造一个会话对象（不写数据库），用于左侧展示
           DB.conversations.push({
-            id: convId,
-            type: 'private',
-            member_ids: [me.id, otherId]
+            id: convId, type: 'private', member_ids: [me.id, otherId]
           });
         }
       }
@@ -1247,14 +1308,13 @@ function renderChat() {
 }
 function bindChatEvents() {
   $('#chatSideList').addEventListener('click', function(e) {
-    var item = e.target.closest('.side-item'); if (item) { currentChatId = item.dataset.cid; renderChat(); }
+    var item = e.target.closest('.side-item'); if (item) { currentChatId = item.dataset.cid; renderChat(); markChatRead(); }
   });
   $('#btnSend').addEventListener('click', async function() {
     var text = $('#chatText').value.trim(); if (!text) return;
     $('#chatText').value = '';
     await db.from('messages').insert({ conversation_id: currentChatId, user_id: me.id, user_name: me.name, text: text });
     
-    // 如果是发私聊，且数据库没有这个会话记录，补记一条
     if (currentChatId.startsWith('private_')) {
       var existing = DB.conversations.find(c => c.id === currentChatId);
       if (!existing) {
@@ -1290,7 +1350,7 @@ function bindChatEvents() {
         await fetchAllData();
       }
       currentChatId = convId;
-      closeModal(); renderChat();
+      closeModal(); renderChat(); markChatRead();
     });
   });
 }
@@ -1451,10 +1511,6 @@ async function init() {
     }
   }
   $('#authView').hidden = false; $('#appView').hidden = true;
-}
-
-function buildFileCatSelect() {
-  $('#fileCatSelect').innerHTML = FILE_CATS.map(c => '<option>'+c+'</option>').join('');
 }
 
 init();
