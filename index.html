@@ -51,7 +51,6 @@ button{font:inherit;cursor:pointer}input,select,textarea{font:inherit;color:inhe
 .nav{display:flex;gap:4px;flex:1;flex-wrap:wrap}
 .nav-btn{position:relative;border:none;background:transparent;height:36px;padding:0 14px;border-radius:10px;font-size:14px;color:var(--muted)}
 .nav-btn:hover{background:#f2f5fb;color:var(--text)}.nav-btn.active{background:#eaf0ff;color:var(--primary);font-weight:600}
-/* 红点通知 */
 .red-dot{position:absolute;top:6px;right:6px;width:8px;height:8px;background:#e11d48;border-radius:50%;box-shadow:0 0 0 2px #fff;}
 .red-dot-text{display:inline-flex;align-items:center;gap:4px;color:#e11d48;font-size:12px;font-weight:500;margin-left:8px}
 .user-box{display:flex;align-items:center;gap:8px}
@@ -84,6 +83,8 @@ main{max-width:1300px;margin:0 auto;padding:22px 20px 90px}
 .task-card{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:10px;transition:.18s}
 .task-card:hover{box-shadow:0 10px 24px rgba(40,70,140,.08);transform:translateY(-1px)}
 .task-card.is-done{opacity:.72;background:#fbfcfe}
+/* 高亮样式 */
+.task-card.highlight{border-color:#3b6ef5;box-shadow:0 0 0 3px rgba(59,110,245,.15);}
 .task-top{display:flex;justify-content:space-between;gap:8px;align-items:center}
 .chip{display:inline-block;font-size:12px;padding:3px 9px;border-radius:999px;background:#eef2fa;color:#51607a;white-space:nowrap}
 .chip.group{background:#eaf0ff;color:#3b6ef5}.chip.ok{background:#e8f8ee;color:var(--ok)}
@@ -411,7 +412,6 @@ let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
 let taskFilter = { status:'all', group:'all' };
 
-// 用于通知的时间戳缓存（利用 localStorage）
 let lastReadTasks = parseInt(localStorage.getItem('lastReadTasks') || '0');
 let lastReadDocs = parseInt(localStorage.getItem('lastReadDocs') || '0');
 
@@ -589,6 +589,10 @@ async function fetchAllData() {
       db.from('invite_codes').select('*').order('created_at', { ascending: false })
     ]);
 
+    if (photosRes.error) console.error("photos:", photosRes.error);
+    if (docsRes.error) console.error("docs:", docsRes.error);
+    if (filesRes.error) console.error("files:", filesRes.error);
+
     DB.tasks = tasksRes.data || [];
     DB.members = membersRes.data || [];
     DB.docs = docsRes.data || [];
@@ -601,7 +605,7 @@ async function fetchAllData() {
 
     checkNotifications();
   } catch (err) {
-    console.error("拉取数据时发生严重崩溃:", err);
+    console.error("拉取数据崩溃:", err);
   }
 }
 
@@ -645,7 +649,7 @@ function markTasksRead() {
   localStorage.setItem('lastReadTasks', lastReadTasks);
   $('#dotTasks').hidden = true;
   $('#unreadTasksText').hidden = true;
-  checkNotifications(); // 重新计算是否还有其他通知
+  checkNotifications();
 }
 function markDocsRead() {
   lastReadDocs = Date.now();
@@ -764,9 +768,7 @@ function switchView(v) {
   $$('.view').forEach(function(s) { s.hidden = (s.id !== 'view-' + v); });
   renderCurrentView();
 
-  // 进入对应页面清除红点
-  if (v === 'tasks') markTasksRead();
-  if (v === 'tasks' && currentView === 'tasks') markDocsRead(); // 文档在工作中心里
+  if (v === 'tasks') { markTasksRead(); markDocsRead(); }
 }
 function renderCurrentView() {
   if (!me) return;
@@ -786,12 +788,17 @@ function renderTasks() {
   if (taskFilter.group !== 'all') items = items.filter(function(t) { return t.group_name === taskFilter.group; });
   $('#taskSummary').textContent = '共 '+DB.tasks.length+' 个任务';
   if (!items.length) { list.innerHTML = '<div class="empty">暂无任务</div>'; return; }
+  
   list.innerHTML = items.map(function(t) {
     var meta = t.status === 'done' ? {label:'已完成', cls:'ok'} : t.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
     var acts = '<button class="btn ghost sm" data-act="detail" data-id="'+t.id+'">详情</button>';
     if (t.status === 'todo') acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
     if (isManager()) acts += '<button class="btn danger sm" data-act="del" data-id="'+t.id+'">删除</button>';
-    return '<article class="task-card '+(t.status==='done'?'is-done':'')+'">' +
+    
+    // 高亮判断：涉及自己组别，且没有完成
+    var isHighlight = (t.group_name === me.group_name || t.group_name === '全部组别') && t.status !== 'done';
+    
+    return '<article class="task-card '+(t.status==='done'?'is-done':'')+' '+(isHighlight?'highlight':'')+'">' +
       '<div class="task-top"><span class="chip group">'+esc(t.group_name||'未分组')+'</span><span class="chip '+meta.cls+'">'+meta.label+'</span></div>' +
       '<h3 class="task-title">'+esc(t.title)+'</h3><p class="task-desc">'+esc((t.description||'').slice(0,90))+'</p>' +
       '<div class="task-actions">'+acts+'</div></article>';
@@ -815,7 +822,18 @@ function bindTaskEvents() {
       toast('已删除'); await fetchAllData(); renderTasks();
     }
     if (btn.dataset.act === 'detail') {
-      alert('任务：' + task.title + '\n\n组别：' + task.group_name + '\n负责人：' + task.owner + '\n截止：' + task.due_date + '\n\n描述：' + (task.description || '无'));
+      // 优化后的任务详情弹窗
+      var meta = task.status === 'done' ? {label:'已完成', cls:'ok'} : task.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
+      openModal(
+        '<h2>'+esc(task.title)+'</h2>' +
+        '<div class="detail-row"><span class="k">状态</span><span class="v"><span class="chip '+meta.cls+'">'+meta.label+'</span></span></div>' +
+        '<div class="detail-row"><span class="k">组别</span><span class="v">'+esc(task.group_name)+'</span></div>' +
+        '<div class="detail-row"><span class="k">负责人</span><span class="v">'+esc(task.owner||'未指定')+'</span></div>' +
+        '<div class="detail-row"><span class="k">截止日期</span><span class="v">'+esc(task.due_date||'未设置')+'</span></div>' +
+        '<div class="detail-row"><span class="k">发布人</span><span class="v">'+esc(task.creator_name||'-')+' · '+fmtTime(task.created_at)+'</span></div>' +
+        '<div class="detail-row"><span class="k">任务描述</span><span class="v">'+esc(task.description||'无').replace(/\n/g,'<br>')+'</span></div>' +
+        '<div class="modal-actions"><button class="btn ghost" data-close>关闭</button></div>'
+      );
     }
   });
 
@@ -856,7 +874,7 @@ function renderDocs() {
       '<div class="doc-meta">'+esc(d.uploader_name)+'</div></div>' +
       '<a href="'+d.blob_key+'" target="_blank" class="btn sm">下载</a></div>';
   }).join('');
-  markDocsRead(); // 渲染时即视为已读
+  markDocsRead();
 }
 function bindDocEvents() {
   $('#docInput').addEventListener('change', async function(e) {
@@ -864,17 +882,21 @@ function bindDocEvents() {
     toast('正在上传到云端...');
     for (var i = 0; i < files.length; i++) {
       var f = files[i]; var path = 'docs/' + Date.now() + '_' + f.name;
-      var { data, error } = await db.storage.from('media').upload(path, f);
-      if (!error) {
+      try {
+        var { error } = await db.storage.from('media').upload(path, f);
+        if (error) throw error;
         var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        await db.from('docs').insert({ name: f.name, size: f.size, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
+        var { error: dbErr } = await db.from('docs').insert({ name: f.name, size: f.size, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
+        if (dbErr) throw dbErr;
+      } catch (err) {
+        alert('上传失败: ' + err.message);
       }
     }
-    e.target.value = ''; toast('上传成功'); await fetchAllData(); renderDocs();
+    e.target.value = ''; toast('上传完毕'); await fetchAllData(); renderDocs();
   });
 }
 
-/* ---------- 相册模块（支持新建文件夹） ---------- */
+/* ---------- 相册模块 ---------- */
 function renderAlbum() {
   var content = $('#albumContent');
   
@@ -889,7 +911,6 @@ function renderAlbum() {
     $('#multiBar').hidden = true;
   }
 
-  // 渲染面包屑
   if (albumState.filter === 'fav') {
     $('#albumCrumbs').innerHTML = '<button class="crumb" data-crumb="root">🏠 根目录</button><span class="crumb-sep">/</span><span class="crumb cur">⭐ 收藏</span>';
   } else if (albumState.currentFolderId) {
@@ -901,7 +922,6 @@ function renderAlbum() {
 
   var html = '';
 
-  // 渲染文件夹 (如果在根目录且不在收藏模式)
   if (albumState.filter === 'all' && !albumState.currentFolderId) {
     var folders = DB.folders || [];
     if (folders.length > 0) {
@@ -916,11 +936,10 @@ function renderAlbum() {
     }
   }
 
-  // 渲染照片
   var items = DB.photos.slice();
   if (albumState.filter === 'fav') items = items.filter(p => p.fav);
   else if (albumState.currentFolderId) items = items.filter(p => p.folder_id === albumState.currentFolderId);
-  else items = items.filter(p => !p.folder_id); // 根目录只显示没有文件夹的照片
+  else items = items.filter(p => !p.folder_id);
 
   if (items.length > 0) {
     html += '<div class="gallery">' + items.map(function(p) {
@@ -935,36 +954,28 @@ function renderAlbum() {
     }).join('') + '</div>';
   }
 
-  if (!html) {
-    html = '<div class="empty">该目录下暂无内容</div>';
-  }
+  if (!html) html = '<div class="empty">该目录下暂无内容</div>';
 
   content.innerHTML = html;
   $('#albumSummary').textContent = '共 ' + DB.photos.length + ' 个媒体 · ' + (DB.folders ? DB.folders.length : 0) + ' 个文件夹';
 }
 
 function bindAlbumEvents() {
-  // 筛选
   $$('#albumSeg .seg-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       $$('#albumSeg .seg-btn').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
       albumState.filter = btn.dataset.filter;
-      albumState.currentFolderId = null; // 切换筛选重置文件夹
+      albumState.currentFolderId = null; 
       renderAlbum();
     });
   });
 
-  // 面包屑导航
   $('#albumCrumbs').addEventListener('click', function(e) {
     var crumb = e.target.closest('[data-crumb]');
-    if (crumb) {
-      albumState.currentFolderId = null;
-      renderAlbum();
-    }
+    if (crumb) { albumState.currentFolderId = null; renderAlbum(); }
   });
 
-  // 新建文件夹
   $('#btnNewFolder').addEventListener('click', function() {
     openModal('<h2>新建文件夹</h2>' +
       '<div class="field"><label>文件夹名称</label><input id="folderName" placeholder="例如：调研现场" /></div>' +
@@ -976,27 +987,27 @@ function bindAlbumEvents() {
     });
   });
 
-  // 上传照片
   $('#photoInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
     for (var i = 0; i < files.length; i++) {
       var f = files[i]; var path = 'photos/' + Date.now() + '_' + f.name;
       toast('正在上传 ' + f.name + '...');
-      const { data: uploadData, error: uploadErr } = await db.storage.from('media').upload(path, f);
-      if (uploadErr) { alert('网盘上传失败: ' + uploadErr.message); continue; }
-      const { data: urlData } = db.storage.from('media').getPublicUrl(path);
-      await db.from('photos').insert({ 
-        name: f.name, kind: 'image', blob_key: urlData.publicUrl, 
-        uploader_id: me.id, uploader_name: me.name,
-        folder_id: albumState.currentFolderId || null // 绑定文件夹
-      });
+      try {
+        var { error } = await db.storage.from('media').upload(path, f);
+        if (error) throw error;
+        var { data: urlData } = db.storage.from('media').getPublicUrl(path);
+        var { error: dbErr } = await db.from('photos').insert({ 
+          name: f.name, kind: 'image', blob_key: urlData.publicUrl, 
+          uploader_id: me.id, uploader_name: me.name,
+          folder_id: albumState.currentFolderId || null
+        });
+        if (dbErr) throw dbErr;
+      } catch (err) { alert('上传失败: ' + err.message); }
     }
     e.target.value = ''; await fetchAllData(); renderAlbum(); toast('上传成功');
   });
 
-  // 内容区域点击
   $('#albumContent').addEventListener('click', async function(e) {
-    // 删除文件夹
     var delBtn = e.target.closest('.fdel');
     if (delBtn) {
       e.stopPropagation();
@@ -1006,14 +1017,12 @@ function bindAlbumEvents() {
       await fetchAllData(); renderAlbum(); return;
     }
 
-    // 进入文件夹
     var folderCard = e.target.closest('.folder-card');
     if (folderCard) {
       albumState.currentFolderId = folderCard.dataset.fid;
       renderAlbum(); return;
     }
 
-    // 图片收藏
     var favBtn = e.target.closest('.ph-fav');
     if (favBtn) {
       e.stopPropagation();
@@ -1023,7 +1032,6 @@ function bindAlbumEvents() {
       return;
     }
 
-    // 图片选中/预览
     var fig = e.target.closest('.ph');
     if (!fig) return;
     var pId = fig.dataset.id;
@@ -1038,11 +1046,9 @@ function bindAlbumEvents() {
     }
   });
 
-  // 多选操作
   $('#btnMulti').addEventListener('click', function() {
     albumState.selectMode = !albumState.selectMode;
-    albumState.selected.clear();
-    renderAlbum();
+    albumState.selected.clear(); renderAlbum();
   });
   $('#multiCancel').addEventListener('click', function() {
     albumState.selectMode = false; renderAlbum();
@@ -1072,7 +1078,7 @@ function bindAlbumEvents() {
   });
 }
 
-/* ---------- 成员信息表（支队长可编辑他人） ---------- */
+/* ---------- 成员信息表 ---------- */
 function renderMembers() {
   var tbody = $('#memberBody');
   tbody.innerHTML = DB.members.map(function(m) {
@@ -1099,15 +1105,58 @@ function renderMembers() {
   tbody.querySelectorAll('button[data-act="edit"]').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var m = DB.members.find(x => x.id === btn.dataset.id);
-      if (canEditMember(m)) openMemberModal(m); // 传入指定成员
+      if (canEditMember(m)) openMemberModal(m);
     });
   });
-}
-function bindMemberEvents() {
-  $('#btnExportMembers').addEventListener('click', function() { toast('导出功能暂略'); });
+
+  renderFiles(); // 顺便渲染下方的文件
 }
 
-/* ---------- 聊天模块（支持私聊） ---------- */
+function bindMemberEvents() {
+  $('#btnExportMembers').addEventListener('click', function() { toast('导出功能暂略'); });
+  
+  // 处理档案中心的文件上传
+  $('#fileInput').addEventListener('change', async function(e) {
+    var files = e.target.files; if (!files.length) return;
+    var cat = $('#fileCatSelect').value;
+    toast('正在上传档案文件...');
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i]; var path = 'files/' + Date.now() + '_' + f.name;
+      try {
+        var { error } = await db.storage.from('media').upload(path, f);
+        if (error) throw error;
+        var { data: urlData } = db.storage.from('media').getPublicUrl(path);
+        var { error: dbErr } = await db.from('files').insert({ 
+          name: f.name, size: f.size, category: cat, blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name 
+        });
+        if (dbErr) throw dbErr;
+      } catch (err) { alert('上传失败: ' + err.message); }
+    }
+    e.target.value = ''; toast('档案文件上传完毕'); await fetchAllData(); renderFiles();
+  });
+}
+
+function renderFiles() {
+  var box = $('#fileList');
+  if (!DB.files.length) { box.innerHTML = '<div class="empty">暂无归档文件</div>'; return; }
+  box.innerHTML = DB.files.map(function(f) {
+    return '<div class="file-item">' +
+      '<div class="file-icon">📎</div>' +
+      '<div class="file-info">' +
+        '<div class="file-name">'+esc(f.name)+'</div>' +
+        '<div class="file-meta">' +
+          '<span class="chip cat">'+esc(f.category||'其他')+'</span>' +
+          '<span>'+esc(f.uploader_name)+'</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="file-actions">' +
+        '<a href="'+f.blob_key+'" target="_blank" class="btn sm">下载</a>' +
+      '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* ---------- 聊天模块（修复私聊及侧边栏） ---------- */
 function renderChat() {
   var html = '';
   
@@ -1119,13 +1168,13 @@ function renderChat() {
   });
 
   // 私聊
-  var privates = DB.conversations.filter(c => c.type === 'private' && (c.member_ids || '').includes(me.id));
+  var privates = DB.conversations.filter(c => c.type === 'private' && (c.member_ids || []).includes(me.id));
   html += '<div class="side-sec">私聊</div>';
   if (privates.length === 0) {
     html += '<div class="sub" style="padding:8px;font-size:12px">暂无私聊</div>';
   }
   privates.forEach(function(c) {
-    var otherId = (c.member_ids || '').split(',').find(id => id !== me.id);
+    var otherId = (c.member_ids || []).find(id => id !== me.id);
     var other = DB.members.find(m => m.user_id === otherId);
     var name = other ? other.name : '未知用户';
     html += '<div class="side-item '+(c.id===currentChatId?'active':'')+'" data-cid="'+c.id+'"><div class="si-txt"><div class="si-name">'+esc(name)+'</div></div></div>';
@@ -1166,13 +1215,14 @@ function bindChatEvents() {
       
       var existing = DB.conversations.find(c => c.id === convId);
       if (!existing) {
+        // 注意：如果是 text[] 类型，要传数组 [me.id, targetId]
         await db.from('conversations').insert({
-          id: convId, type: 'private', name: '私聊', member_ids: me.id + ',' + targetId, created_by: me.id
+          id: convId, type: 'private', name: '私聊', member_ids: [me.id, targetId], created_by: me.id
         });
         await fetchAllData();
       }
       currentChatId = convId;
-      closeModal(); renderChat();
+      closeModal(); renderChat(); // 刷新左侧侧边栏
     });
   });
 }
@@ -1196,9 +1246,9 @@ function openMemberModal(member) {
   var isSelf = member.user_id === me.id;
   var tempAvatar = member.avatar_url ? JSON.parse(member.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
 
-  openModal(
-    '<h2>' + (isSelf ? '我的资料' : '编辑成员信息') + '</h2>' +
-    '<div class="avatar-picker" style="margin-bottom:16px">' +
+  // 移除编辑他人时的头像区域
+  var avatarPickerHTML = isSelf ? (
+    '<div class="avatar-picker" style="margin-bottom:16px" id="avatarPickerArea">' +
       '<div class="ap-left"><div class="avatar avatar-xl" id="pfPreview"></div></div>' +
       '<div class="ap-right">' +
         '<label class="btn sm">上传图片（可裁剪）<input type="file" id="pfFile" accept="image/*" hidden /></label>' +
@@ -1206,9 +1256,19 @@ function openMemberModal(member) {
         '<div class="ap-colors" id="pfColors"></div>' +
         '<div class="ap-emojis" id="pfEmojis"></div>' +
       '</div>' +
-    '</div>' +
+    '</div>'
+  ) : '';
+
+  // 姓名只读逻辑
+  var nameField = isSelf 
+    ? '<input id="pfName" value="'+esc(member.name)+'" />' 
+    : '<input id="pfName" value="'+esc(member.name)+'" readonly style="background:#f5f7fb;cursor:not-allowed" />';
+
+  openModal(
+    '<h2>' + (isSelf ? '我的资料' : '编辑成员信息') + '</h2>' +
+    avatarPickerHTML +
     '<div class="grid2">' +
-      '<div class="field"><label>姓名 *</label><input id="pfName" value="'+esc(member.name)+'" /></div>' +
+      '<div class="field"><label>姓名 ' + (isSelf ? '*' : '(不可修改)') + '</label>' + nameField + '</div>' +
       '<div class="field"><label>组别</label><select id="pfGroup">'+GROUPS.map(g => '<option '+(g===member.group_name?'selected':'')+'>'+g+'</option>').join('')+'</select></div>' +
       '<div class="field"><label>角色</label>' + 
         (canChangeRole() ? '<select id="pfRole">'+ROLES.map(r => '<option '+(r===member.role?'selected':'')+'>'+r+'</option>').join('')+'</select>' : '<input value="'+esc(member.role)+'" readonly style="background:#f5f7fb" />') +
@@ -1230,26 +1290,28 @@ function openMemberModal(member) {
     { wide: true }
   );
 
-  var preview = $('#pfPreview');
-  var paint = function() { setAvatar(preview, tempAvatar, $('#pfName').value.trim() || '未知'); };
-  paint();
+  if (isSelf) {
+    var preview = $('#pfPreview');
+    var paint = function() { setAvatar(preview, tempAvatar, $('#pfName').value.trim() || '未知'); };
+    paint();
 
-  $('#pfColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot-color" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
-  $('#pfEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
+    $('#pfColors').innerHTML = AP_COLORS.map(function(c) { return '<button type="button" class="dot-color" data-color="'+c+'" style="background:'+c+'"></button>'; }).join('');
+    $('#pfEmojis').innerHTML = AP_EMOJIS.map(function(e) { return '<button type="button" class="emo" data-emoji="'+e+'">'+e+'</button>'; }).join('');
 
-  $('#pfColors').addEventListener('click', function(e) {
-    var b = e.target.closest('.dot-color'); if (!b) return;
-    tempAvatar = { kind:'gen', color:b.dataset.color, emoji:(tempAvatar && tempAvatar.emoji) || '' }; paint();
-  });
-  $('#pfEmojis').addEventListener('click', function(e) {
-    var b = e.target.closest('.emo'); if (!b) return;
-    tempAvatar = { kind:'gen', color:(tempAvatar && tempAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji }; paint();
-  });
-  $('#pfFile').addEventListener('change', function(e) {
-    var f = e.target.files[0]; e.target.value = ''; if (!f) return;
-    openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); });
-  });
-  $('#pfName').addEventListener('input', paint);
+    $('#pfColors').addEventListener('click', function(e) {
+      var b = e.target.closest('.dot-color'); if (!b) return;
+      tempAvatar = { kind:'gen', color:b.dataset.color, emoji:(tempAvatar && tempAvatar.emoji) || '' }; paint();
+    });
+    $('#pfEmojis').addEventListener('click', function(e) {
+      var b = e.target.closest('.emo'); if (!b) return;
+      tempAvatar = { kind:'gen', color:(tempAvatar && tempAvatar.color) || AP_COLORS[0], emoji:b.dataset.emoji }; paint();
+    });
+    $('#pfFile').addEventListener('change', function(e) {
+      var f = e.target.files[0]; e.target.value = ''; if (!f) return;
+      openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); });
+    });
+    $('#pfName').addEventListener('input', paint);
+  }
 
   $('#pfSave').addEventListener('click', async function() {
     var payloadName = $('#pfName').value.trim();
@@ -1258,7 +1320,6 @@ function openMemberModal(member) {
     $('#pfSave').textContent = '保存中...'; $('#pfSave').disabled = true;
 
     var updateData = {
-      name: payloadName,
       group_name: $('#pfGroup').value,
       school: $('#pfSchool').value.trim(),
       college: $('#pfCollege').value.trim(),
@@ -1271,15 +1332,18 @@ function openMemberModal(member) {
       phone: $('#pfPhone').value.trim(),
       emergency_name: $('#pfEmergencyName').value.trim(),
       emergency_phone: $('#pfEmergencyPhone').value.trim(),
-      note: $('#pfNote').value.trim(),
-      avatar_url: JSON.stringify(tempAvatar)
+      note: $('#pfNote').value.trim()
     };
+
+    if (isSelf) {
+      updateData.name = payloadName;
+      updateData.avatar_url = JSON.stringify(tempAvatar);
+    }
 
     if (canChangeRole() && $('#pfRole')) {
       updateData.role = $('#pfRole').value;
     }
 
-    // 使用 id 更新，保证支队长可以改别人的
     var { error } = await db.from('members').update(updateData).eq('id', member.id);
 
     if (error) {
@@ -1306,6 +1370,7 @@ function openMemberModal(member) {
 async function init() {
   bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindChatEvents();
   bindAvatarPicker();
+  buildFileCatSelect();
 
   const { data: { session } } = await db.auth.getSession();
   if (session) {
@@ -1320,6 +1385,10 @@ async function init() {
     }
   }
   $('#authView').hidden = false; $('#appView').hidden = true;
+}
+
+function buildFileCatSelect() {
+  $('#fileCatSelect').innerHTML = FILE_CATS.map(c => '<option>'+c+'</option>').join('');
 }
 
 init();
