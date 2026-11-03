@@ -778,57 +778,22 @@ function bindDocEvents() {
 
 /* ---------- 相册模块 ---------- */
 function renderAlbum() {
-  $('#albumCrumbs').innerHTML = '<span class="crumb cur">🏠 根目录</span>';
-  $('#albumContent').innerHTML = '<div class="gallery">' + DB.photos.map(function(p) {
-    return '<figure class="ph"><div class="thumb"><img src="'+p.blob_key+'" /></div><figcaption>'+esc(p.uploader_name)+'</figcaption></figure>';
-  }).join('') + '</div>';
-}
-function bindAlbumEvents() {
-  $('#photoInput').addEventListener('change', async function(e) {
-    var files = e.target.files; if (!files.length) return;
-    
-    for (var i = 0; i < files.length; i++) {
-      var f = files[i];
-      var path = 'photos/' + Date.now() + '_' + f.name;
-      
-      toast('正在上传 ' + f.name + '...');
-
-      // 1. 上传到 Storage
-      const { data: uploadData, error: uploadErr } = await db.storage.from('media').upload(path, f);
-      if (uploadErr) {
-        console.error("Storage上传报错:", uploadErr);
-        toast('上传网盘失败: ' + uploadErr.message);
-        continue;
-      }
-
-      // 2. 获取公开 URL
-      const { data: urlData } = db.storage.from('media').getPublicUrl(path);
-      if (!urlData || !urlData.publicUrl) {
-        toast('获取图片网址失败');
-        continue;
-      }
-
-      // 3. 写入数据库
-      const { error: dbErr } = await db.from('photos').insert({ 
-        name: f.name, 
-        kind: 'image', 
-        blob_key: urlData.publicUrl, 
-        uploader_id: me.id, 
-        uploader_name: me.name 
-      });
-
-      if (dbErr) {
-        console.error("数据库写入报错:", dbErr);
-        toast('写入数据库失败: ' + dbErr.message);
-        continue;
-      }
+  try {
+    $('#albumCrumbs').innerHTML = '<span class="crumb cur">🏠 根目录</span>';
+    if (!DB.photos || DB.photos.length === 0) {
+      $('#albumContent').innerHTML = '<div class="empty">暂无照片，快上传一张吧！</div>';
+      return;
     }
     
-    e.target.value = ''; 
-    toast('操作完成'); 
-    await fetchAllData(); 
-    renderAlbum();
-  });
+    $('#albumContent').innerHTML = '<div class="gallery">' + DB.photos.map(function(p) {
+      // 兼容处理：如果图片地址是空的，显示提示
+      var imgUrl = p.blob_key ? p.blob_key : 'https://via.placeholder.com/200?text=No+Image';
+      return '<figure class="ph"><div class="thumb"><img src="'+imgUrl+'" /></div><figcaption>'+esc(p.uploader_name || '未知')+'</figcaption></figure>';
+    }).join('') + '</div>';
+  } catch (err) {
+    console.error("相册渲染崩溃:", err);
+    $('#albumContent').innerHTML = '<div class="empty" style="color:red">相册显示失败，请按 F12 查看控制台</div>';
+  }
 }
 
 /* ---------- 成员信息表 ---------- */
