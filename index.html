@@ -77,7 +77,6 @@ main{max-width:1300px;margin:0 auto;padding:22px 20px 90px}
 .doc-name{font-size:13.5px;font-weight:500;line-height:1.4;word-break:break-all;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .doc-meta{font-size:11.5px;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .doc-acts{display:flex;gap:4px;flex:none}
-/* 任务卡片红点 */
 .task-card{position:relative}
 .task-dot{position:absolute;top:-4px;right:-4px;width:12px;height:12px;background:#e11d48;border-radius:50%;box-shadow:0 0 0 2px #fff;}
 .task-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:14px}
@@ -95,14 +94,11 @@ main{max-width:1300px;margin:0 auto;padding:22px 20px 90px}
 .task-desc{margin:0;font-size:13px;color:var(--muted);line-height:1.55;word-break:break-word}
 .task-meta{display:flex;gap:14px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
 .task-actions{display:flex;gap:8px;margin-top:auto;padding-top:4px;flex-wrap:wrap;align-items:center}
-
-/* 时间线 */
 .timeline{list-style:none;padding:0;margin:10px 0 0;border-left:2px solid #eef1f7;margin-left:8px}
 .timeline li{position:relative;padding-left:20px;margin-bottom:12px;font-size:13.5px;color:var(--text)}
 .timeline li::before{content:'';position:absolute;left:-6px;top:4px;width:10px;height:10px;border-radius:50%;background:#e2e8f0;border:2px solid #fff}
 .timeline li.active::before{background:var(--primary)}
 .timeline .time{font-size:11.5px;color:var(--muted);margin-top:2px}
-
 .seg{display:flex;background:#f2f5fb;padding:4px;border-radius:10px;gap:4px;height:var(--h);align-items:center}
 .seg-btn{border:none;background:transparent;height:var(--hs);padding:0 14px;border-radius:8px;font-size:13.5px;color:var(--muted)}
 .seg-btn.active{background:#fff;color:var(--text);font-weight:600;box-shadow:0 2px 6px rgba(30,60,120,.08)}
@@ -144,7 +140,8 @@ main{max-width:1300px;margin:0 auto;padding:22px 20px 90px}
 .name-cell{display:flex;align-items:center;gap:8px;font-weight:500}
 .row-actions{display:flex;gap:6px}.empty-cell{text-align:center;color:var(--muted);padding:28px}
 .file-list{display:flex;flex-direction:column;gap:8px}
-.file-item{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.file-item{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;transition:.15s}
+.file-item.selected{border-color:var(--primary);background:#f4f7ff}
 .file-icon{width:38px;height:38px;border-radius:10px;background:#eef3ff;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none}
 .file-info{flex:1;min-width:0}
 .file-name{font-size:14px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -368,6 +365,7 @@ main{padding:16px 14px 90px}.topbar{padding:9px 12px;gap:8px}
           <select class="sel" id="fileFilterSelect">
             <option value="all">全部资料</option>
           </select>
+          <button class="btn ghost sm" id="btnFileMode" style="flex:none">管理</button>
           <button class="btn primary" id="btnOpenUploadFile">上传文件</button>
         </div>
       </div>
@@ -423,7 +421,8 @@ let currentChatId = 'conv_all';
 let regAvatar = null;
 let profileAvatar = null;
 let albumState = { filter:'all', currentFolderId:null, selectMode:false, selected:new Set() };
-let docState = { selectMode: false, selected: new Set() }; // 文档中心多选状态
+let docState = { selectMode: false, selected: new Set() };
+let fileState = { selectMode: false, selected: new Set() }; // 档案文件多选状态
 let taskFilter = { status:'all', group:'all' };
 let fileFilter = 'all';
 
@@ -431,7 +430,6 @@ let fileFilter = 'all';
 let lastReadTasks = parseInt(localStorage.getItem('lastReadTasks') || '0');
 let lastReadDocs = parseInt(localStorage.getItem('lastReadDocs') || '0');
 let lastReadChat = parseInt(localStorage.getItem('lastReadChat') || '0');
-// 记录各个聊天窗口的已读时间，用于左侧侧边栏红点提示
 let chatReadTimes = JSON.parse(localStorage.getItem('chatReadTimes') || '{}');
 
 const GROUPS = ['学术组','宣传组','设计组','建筑组'];
@@ -608,10 +606,6 @@ async function fetchAllData() {
       db.from('invite_codes').select('*').order('created_at', { ascending: false })
     ]);
 
-    if (photosRes.error) console.error("photos:", photosRes.error);
-    if (docsRes.error) console.error("docs:", docsRes.error);
-    if (filesRes.error) console.error("files:", filesRes.error);
-
     DB.tasks = tasksRes.data || [];
     DB.members = membersRes.data || [];
     DB.docs = docsRes.data || [];
@@ -628,34 +622,59 @@ async function fetchAllData() {
   }
 }
 
-// 只拉取聊天数据（用于轮询）
-async function pollChatData() {
+// 静默轮询（每 5 秒）
+async function pollDataSilently() {
   if (!me) return;
   try {
-    const [msgsRes, convsRes] = await Promise.all([
+    const [tasksRes, docsRes, filesRes, msgsRes, convsRes] = await Promise.all([
+      db.from('tasks').select('*').order('created_at', { ascending: false }),
+      db.from('docs').select('*').order('created_at', { ascending: false }),
+      db.from('files').select('*').order('created_at', { ascending: false }),
       db.from('messages').select('*').order('created_at', { ascending: true }),
       db.from('conversations').select('*')
     ]);
-    if (!msgsRes.error) DB.messages = msgsRes.data || [];
-    if (!convsRes.error) DB.conversations = convsRes.data || [];
+    
+    if (tasksRes.error || docsRes.error || filesRes.error || msgsRes.error || convsRes.error) return;
 
-    // 检测未读新消息（全局红点）
+    const newTasks = tasksRes.data || [];
+    const newDocs = docsRes.data || [];
+    const newFiles = filesRes.data || [];
+    const newMsgs = msgsRes.data || [];
+    const newConvs = convsRes.data || [];
+
+    let needRenderTasks = JSON.stringify(DB.tasks) !== JSON.stringify(newTasks);
+    let needRenderDocs = JSON.stringify(DB.docs) !== JSON.stringify(newDocs);
+    let needRenderFiles = JSON.stringify(DB.files) !== JSON.stringify(newFiles);
+    let needRenderChat = JSON.stringify(DB.messages) !== JSON.stringify(newMsgs);
+
+    DB.tasks = newTasks;
+    DB.docs = newDocs;
+    DB.files = newFiles;
+    DB.messages = newMsgs;
+    DB.conversations = newConvs;
+
+    checkNotifications();
+
+    // 只有当发现数据改变，且用户没有在输入时，才重新渲染
+    if (currentView === 'tasks') {
+      if (needRenderTasks && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') renderTasks();
+      if (needRenderDocs && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') renderDocs();
+    } else if (currentView === 'members') {
+      if (needRenderFiles && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') renderFiles();
+    } else if (currentView === 'chat') {
+      if (needRenderChat && document.activeElement !== $('#chatText')) {
+        renderChat();
+        markChatRead();
+      }
+    }
+    
+    // 检查是否有新消息红点
     var hasNewChat = false;
     DB.messages.forEach(m => {
-      if (new Date(m.created_at).getTime() > lastReadChat && m.user_id !== me.id) {
-        hasNewChat = true;
-      }
+      if (new Date(m.created_at).getTime() > lastReadChat && m.user_id !== me.id) hasNewChat = true;
     });
-
-    if (hasNewChat && currentView !== 'chat') {
-      $('#dotChat').hidden = false;
-    }
-
-    if (currentView === 'chat') {
-      renderChat();
-      markChatRead();
-    }
-  } catch (err) {}
+    if (hasNewChat && currentView !== 'chat') $('#dotChat').hidden = false;
+  } catch(e) {}
 }
 
 function checkNotifications() {
@@ -773,8 +792,8 @@ function startApp() {
   $('#authView').hidden = true; $('#appView').hidden = false;
   refreshTopbar(); buildGroupFilter(); switchView(currentView);
   
-  // 启动聊天轮询（每 5 秒）
-  setInterval(pollChatData, 5000);
+  // 开启全局静默轮询（5秒一次），实现任务、文件、聊天动态更新
+  setInterval(pollDataSilently, 5000);
 }
 function refreshTopbar() {
   if (!me) return;
@@ -836,15 +855,12 @@ function renderTasks() {
     
     var acts = '<button class="btn ghost sm" data-act="detail" data-id="'+t.id+'">详情</button>';
     
-    // 负责人完成任务
     if (t.status === 'todo' && isOwner) {
       acts += '<button class="btn primary sm" data-act="submit" data-id="'+t.id+'">完成任务</button>';
     }
-    // 管理员批复
     if (t.status === 'pending' && isManager()) {
       acts += '<button class="btn primary sm" data-act="review" data-id="'+t.id+'">批复</button>';
     }
-    // 删除
     if (isManager()) acts += '<button class="btn danger sm" data-act="del" data-id="'+t.id+'">删除</button>';
     
     var isHighlight = (t.group_name === me.group_name || t.group_name === '全部组别') && t.status !== 'done';
@@ -898,7 +914,6 @@ function bindTaskEvents() {
     if (btn.dataset.act === 'detail') {
       var meta = task.status === 'done' ? {label:'已完成', cls:'ok'} : task.status === 'pending' ? {label:'待批复', cls:'pending'} : {label:'待完成', cls:'pending'};
       
-      // 构建时间线
       var timelineHtml = '<ul class="timeline">';
       timelineHtml += '<li class="active"><b>任务发布</b><div class="time">'+esc(task.creator_name||'系统')+' 于 '+fmtTime(task.created_at)+'</div></li>';
       if (task.submitted_at) {
@@ -960,7 +975,7 @@ function bindTaskEvents() {
   });
 }
 
-/* ---------- 文档中心与文件资料 ---------- */
+/* ---------- 文档中心 ---------- */
 function renderDocs() {
   var list = $('#docList'); $('#docSummary').textContent = '实践必备文件 · 共 '+DB.docs.length+' 份';
   
@@ -969,7 +984,7 @@ function renderDocs() {
     $('#btnDocMode').classList.add('on');
     $('#multiBar').hidden = false;
     $('#multiCount').textContent = '已选 ' + docState.selected.size + ' 项';
-    $('#multiDelete').hidden = !isManager(); // 只有管理员能看删除
+    $('#multiDelete').hidden = !isManager();
   } else {
     $('#btnDocMode').textContent = '管理';
     $('#btnDocMode').classList.remove('on');
@@ -1007,47 +1022,6 @@ function bindDocEvents() {
     renderDocs();
   });
 
-  // 多选操作栏（复用共用的 multiBar）
-  $('#multiAll').addEventListener('click', function() {
-    if (currentView === 'tasks') { // 这里是文档中心
-      if (docState.selected.size === DB.docs.length) docState.selected.clear();
-      else DB.docs.forEach(d => docState.selected.add(d.id));
-      renderDocs();
-    } else if (currentView === 'album') {
-      // ... 相册逻辑
-      var items = currentVisibleMedia();
-      if (albumState.selected.size === items.length) albumState.selected.clear();
-      else items.forEach(p => albumState.selected.add(p.id));
-      renderAlbum();
-    }
-  });
-  $('#multiCancel').addEventListener('click', function() {
-    if (currentView === 'tasks') { docState.selectMode = false; docState.selected.clear(); renderDocs(); }
-    else if (currentView === 'album') exitMultiMode();
-  });
-  $('#multiDownload').addEventListener('click', function() {
-    if (currentView === 'tasks') {
-      if (!docState.selected.size) return toast('请先勾选');
-      docState.selected.forEach(id => {
-        var d = DB.docs.find(x => x.id === id);
-        if (d) { var a = document.createElement('a'); a.href = d.blob_key; a.target = '_blank'; a.download = d.name; a.click(); }
-      });
-    } else if (currentView === 'album') {
-      downloadSelected();
-    }
-  });
-  $('#multiDelete').addEventListener('click', async function() {
-    if (currentView === 'tasks') {
-      if (!isManager()) return toast('仅管理员可删除');
-      if (!docState.selected.size) return toast('请先勾选');
-      if (!confirm('确定删除选中的 ' + docState.selected.size + ' 份文档？')) return;
-      for (let id of docState.selected) { await db.from('docs').delete().eq('id', id); }
-      docState.selected.clear(); docState.selectMode = false; await fetchAllData(); renderDocs();
-    } else if (currentView === 'album') {
-      // 相册删除逻辑
-    }
-  });
-
   $('#docInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
     toast('正在上传到云端...');
@@ -1068,20 +1042,36 @@ function bindDocEvents() {
   });
 }
 
-// 档案文件列表及筛选
+/* ---------- 档案文件资料（支持管理） ---------- */
 function buildFileCatSelect() {
   var filterHtml = '<option value="all">全部资料</option>' + FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
   $('#fileFilterSelect').innerHTML = filterHtml;
 }
+
 function renderFiles() {
   var box = $('#fileList');
+  
+  if (fileState.selectMode) {
+    $('#btnFileMode').textContent = '取消';
+    $('#btnFileMode').classList.add('on');
+    $('#multiBar').hidden = false;
+    $('#multiCount').textContent = '已选 ' + fileState.selected.size + ' 项';
+    $('#multiDelete').hidden = !isManager(); // 仅管理员可删
+  } else {
+    $('#btnFileMode').textContent = '管理';
+    $('#btnFileMode').classList.remove('on');
+    $('#multiBar').hidden = true;
+  }
+
   var filtered = DB.files;
   if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
   
   if (!filtered.length) { box.innerHTML = '<div class="empty">暂无归档文件</div>'; return; }
   
   box.innerHTML = filtered.map(function(f) {
-    return '<div class="file-item">' +
+    var isSel = fileState.selected.has(f.id);
+    return '<div class="file-item '+(isSel?'selected':'')+'" data-id="'+f.id+'">' +
+      (fileState.selectMode ? '<div style="width:18px;height:18px;border-radius:4px;border:1px solid #ccc;background:'+(isSel?'var(--primary)':'#fff')+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px">'+(isSel?'✓':'')+'</div>' : '') +
       '<div class="file-icon">📎</div>' +
       '<div class="file-info">' +
         '<div class="file-name">'+esc(f.name)+'</div>' +
@@ -1091,19 +1081,33 @@ function renderFiles() {
         '</div>' +
       '</div>' +
       '<div class="file-actions">' +
-        '<a href="'+f.blob_key+'" target="_blank" class="btn sm">下载</a>' +
+        (fileState.selectMode ? '' : '<a href="'+f.blob_key+'" target="_blank" class="btn sm">下载</a>') +
       '</div>' +
     '</div>';
   }).join('');
 }
+
 function bindFileEvents() {
-  // 筛选变动
+  $('#btnFileMode').addEventListener('click', function() {
+    fileState.selectMode = !fileState.selectMode;
+    fileState.selected.clear();
+    renderFiles();
+  });
+
+  $('#fileList').addEventListener('click', function(e) {
+    if (!fileState.selectMode) return;
+    var item = e.target.closest('.file-item'); if (!item) return;
+    var id = item.dataset.id;
+    if (fileState.selected.has(id)) fileState.selected.delete(id);
+    else fileState.selected.add(id);
+    renderFiles();
+  });
+
   $('#fileFilterSelect').addEventListener('change', function(e) {
     fileFilter = e.target.value;
     renderFiles();
   });
 
-  // 点开上传弹窗
   $('#btnOpenUploadFile').addEventListener('click', function() {
     var catOptions = FILE_CATS.map(c => '<option value="'+c+'">'+c+'</option>').join('');
     openModal(
@@ -1139,6 +1143,70 @@ function bindFileEvents() {
   });
 }
 
+/* ---------- 全局多选操作路由 (由文档/文件/相册共用) ---------- */
+function bindMultiBarEvents() {
+  $('#multiAll').addEventListener('click', function() {
+    if (currentView === 'tasks') { // 文档
+      if (docState.selected.size === DB.docs.length) docState.selected.clear();
+      else DB.docs.forEach(d => docState.selected.add(d.id));
+      renderDocs();
+    } else if (currentView === 'album') {
+      var items = currentVisibleMedia();
+      if (albumState.selected.size === items.length) albumState.selected.clear();
+      else items.forEach(p => albumState.selected.add(p.id));
+      renderAlbum();
+    } else if (currentView === 'members') { // 文件
+      var filtered = DB.files;
+      if (fileFilter !== 'all') filtered = filtered.filter(f => f.category === fileFilter);
+      if (fileState.selected.size === filtered.length) fileState.selected.clear();
+      else filtered.forEach(f => fileState.selected.add(f.id));
+      renderFiles();
+    }
+  });
+
+  $('#multiCancel').addEventListener('click', function() {
+    if (currentView === 'tasks') { docState.selectMode = false; docState.selected.clear(); renderDocs(); }
+    else if (currentView === 'album') exitMultiMode();
+    else if (currentView === 'members') { fileState.selectMode = false; fileState.selected.clear(); renderFiles(); }
+  });
+
+  $('#multiDownload').addEventListener('click', function() {
+    if (currentView === 'tasks') {
+      if (!docState.selected.size) return toast('请先勾选');
+      docState.selected.forEach(id => {
+        var d = DB.docs.find(x => x.id === id);
+        if (d) { var a = document.createElement('a'); a.href = d.blob_key; a.target = '_blank'; a.download = d.name; a.click(); }
+      });
+    } else if (currentView === 'album') {
+      downloadSelected();
+    } else if (currentView === 'members') {
+      if (!fileState.selected.size) return toast('请先勾选');
+      fileState.selected.forEach(id => {
+        var f = DB.files.find(x => x.id === id);
+        if (f) { var a = document.createElement('a'); a.href = f.blob_key; a.target = '_blank'; a.download = f.name; a.click(); }
+      });
+    }
+  });
+
+  $('#multiDelete').addEventListener('click', async function() {
+    if (currentView === 'tasks') {
+      if (!isManager()) return toast('仅管理员可删除');
+      if (!docState.selected.size) return toast('请先勾选');
+      if (!confirm('确定删除选中的 ' + docState.selected.size + ' 份文档？')) return;
+      for (let id of docState.selected) { await db.from('docs').delete().eq('id', id); }
+      docState.selected.clear(); docState.selectMode = false; await fetchAllData(); renderDocs();
+    } else if (currentView === 'album') {
+      // 相册删除逻辑
+    } else if (currentView === 'members') {
+      if (!isManager()) return toast('仅管理员可删除');
+      if (!fileState.selected.size) return toast('请先勾选');
+      if (!confirm('确定删除选中的 ' + fileState.selected.size + ' 份文件？')) return;
+      for (let id of fileState.selected) { await db.from('files').delete().eq('id', id); }
+      fileState.selected.clear(); fileState.selectMode = false; await fetchAllData(); renderFiles();
+    }
+  });
+}
+
 /* ---------- 相册模块 ---------- */
 function renderAlbum() {
   var content = $('#albumContent');
@@ -1148,7 +1216,7 @@ function renderAlbum() {
     $('#btnMulti').classList.add('on');
     $('#multiBar').hidden = false;
     $('#multiCount').textContent = '已选 ' + albumState.selected.size + ' 项';
-    $('#multiDelete').hidden = false; // 相册所有人可删
+    $('#multiDelete').hidden = false;
   } else {
     $('#btnMulti').textContent = '多选';
     $('#btnMulti').classList.remove('on');
@@ -1354,7 +1422,6 @@ function renderChat() {
 
   var html = '';
   
-  // 群聊
   var groups = DB.conversations.filter(c => c.type === 'group' || !c.type);
   html += '<div class="side-sec">群聊</div>';
   groups.forEach(function(c) {
@@ -1367,7 +1434,6 @@ function renderChat() {
       (isUnread ? '<span class="red-dot" style="margin-left:auto"></span>' : '') + '</div>';
   });
 
-  // 私聊
   var privates = DB.conversations.filter(c => c.type === 'private' && (c.member_ids || []).includes(me.id));
   html += '<div class="side-sec">私聊</div>';
   if (privates.length === 0) {
@@ -1592,7 +1658,7 @@ function openMemberModal(member) {
 
 /* ---------- 初始化流程 ---------- */
 async function init() {
-  bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindFileEvents(); bindChatEvents();
+  bindAuthTabs(); bindAuthForms(); bindTopbar(); bindTaskEvents(); bindDocEvents(); bindAlbumEvents(); bindMemberEvents(); bindFileEvents(); bindChatEvents(); bindMultiBarEvents();
   bindAvatarPicker();
   buildFileCatSelect();
 
