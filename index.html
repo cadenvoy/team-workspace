@@ -559,27 +559,36 @@ document.addEventListener('keydown', function(e) { if (e.key === 'Escape') close
 
 /* ---------- 数据加载 ---------- */
 async function fetchAllData() {
-  const [tasksRes, membersRes, docsRes, foldersRes, photosRes, filesRes, convsRes, msgsRes, invitesRes] = await Promise.all([
-    db.from('tasks').select('*').order('created_at', { ascending: false }),
-    db.from('members').select('*'),
-    db.from('docs').select('*').order('created_at', { ascending: false }),
-    db.from('folders').select('*'),
-    db.from('photos').select('*').order('created_at', { ascending: false }),
-    db.from('files').select('*').order('created_at', { ascending: false }),
-    db.from('conversations').select('*'),
-    db.from('messages').select('*').order('created_at', { ascending: true }),
-    db.from('invite_codes').select('*').order('created_at', { ascending: false })
-  ]);
+  try {
+    const [tasksRes, membersRes, docsRes, foldersRes, photosRes, filesRes, convsRes, msgsRes, invitesRes] = await Promise.all([
+      db.from('tasks').select('*').order('created_at', { ascending: false }),
+      db.from('members').select('*'),
+      db.from('docs').select('*').order('created_at', { ascending: false }),
+      db.from('folders').select('*'),
+      db.from('photos').select('*').order('created_at', { ascending: false }),
+      db.from('files').select('*').order('created_at', { ascending: false }),
+      db.from('conversations').select('*'),
+      db.from('messages').select('*').order('created_at', { ascending: true }),
+      db.from('invite_codes').select('*').order('created_at', { ascending: false })
+    ]);
 
-  DB.tasks = tasksRes.data || [];
-  DB.members = membersRes.data || [];
-  DB.docs = docsRes.data || [];
-  DB.folders = foldersRes.data || [];
-  DB.photos = photosRes.data || [];
-  DB.files = filesRes.data || [];
-  DB.conversations = convsRes.data || [];
-  DB.messages = msgsRes.data || [];
-  DB.inviteCodes = invitesRes.data || [];
+    // 检查是否有报错，有则打印在控制台
+    if (photosRes.error) console.error("读取 photos 表失败:", photosRes.error);
+    if (tasksRes.error) console.error("读取 tasks 表失败:", tasksRes.error);
+
+    DB.tasks = tasksRes.data || [];
+    DB.members = membersRes.data || [];
+    DB.docs = docsRes.data || [];
+    DB.folders = foldersRes.data || [];
+    DB.photos = photosRes.data || [];
+    DB.files = filesRes.data || [];
+    DB.conversations = convsRes.data || [];
+    DB.messages = msgsRes.data || [];
+    DB.inviteCodes = invitesRes.data || [];
+  } catch (err) {
+    console.error("拉取数据时发生严重崩溃:", err);
+    toast("数据同步失败，请检查网络或权限");
+  }
 }
 
 /* ---------- 登录 / 注册 ---------- */
@@ -786,7 +795,6 @@ function renderAlbum() {
     }
     
     $('#albumContent').innerHTML = '<div class="gallery">' + DB.photos.map(function(p) {
-      // 兼容处理：如果图片地址是空的，显示提示
       var imgUrl = p.blob_key ? p.blob_key : 'https://via.placeholder.com/200?text=No+Image';
       return '<figure class="ph"><div class="thumb"><img src="'+imgUrl+'" /></div><figcaption>'+esc(p.uploader_name || '未知')+'</figcaption></figure>';
     }).join('') + '</div>';
@@ -794,6 +802,53 @@ function renderAlbum() {
     console.error("相册渲染崩溃:", err);
     $('#albumContent').innerHTML = '<div class="empty" style="color:red">相册显示失败，请按 F12 查看控制台</div>';
   }
+}
+
+function bindAlbumEvents() {
+  $('#photoInput').addEventListener('change', async function(e) {
+    var files = e.target.files; if (!files.length) return;
+    
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var path = 'photos/' + Date.now() + '_' + f.name;
+      
+      toast('正在上传 ' + f.name + '...');
+
+      // 1. 上传到 Storage
+      const { data: uploadData, error: uploadErr } = await db.storage.from('media').upload(path, f);
+      if (uploadErr) {
+        console.error("Storage上传报错:", uploadErr);
+        alert('上传网盘失败: ' + uploadErr.message);
+        continue;
+      }
+
+      // 2. 获取公开 URL
+      const { data: urlData } = db.storage.from('media').getPublicUrl(path);
+      if (!urlData || !urlData.publicUrl) {
+        alert('获取图片网址失败');
+        continue;
+      }
+
+      // 3. 写入数据库
+      const { data: insertData, error: dbErr } = await db.from('photos').insert({ 
+        name: f.name, 
+        kind: 'image', 
+        blob_key: urlData.publicUrl, 
+        uploader_id: me.id, 
+        uploader_name: me.name 
+      }).select();
+
+      if (dbErr) {
+        console.error("数据库写入报错:", dbErr);
+        alert('❌ 数据库写入失败: ' + dbErr.message);
+      }
+    }
+    
+    e.target.value = ''; 
+    await fetchAllData(); 
+    renderAlbum();
+    alert('文件处理流程结束');
+  });
 }
 
 /* ---------- 成员信息表 ---------- */
@@ -805,7 +860,6 @@ function renderMembers() {
       '<span class="sub">（信息已同步云端）</span></td><td>'+acts+'</td></tr>';
   }).join('');
   
-  // 绑定成员编辑事件
   tbody.querySelectorAll('button[data-act="edit"]').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var m = DB.members.find(x => x.id === btn.dataset.id);
@@ -859,7 +913,7 @@ function openProfileModal() {
   if (!myMember) return toast('未找到成员信息');
   
   profileAvatar = myMember.avatar_url ? JSON.parse(myMember.avatar_url) : {kind:'gen', color:'#3b6ef5', emoji:''};
-  var tempAvatar = JSON.parse(JSON.stringify(profileAvatar)); // 临时保存修改
+  var tempAvatar = JSON.parse(JSON.stringify(profileAvatar));
 
   openModal(
     '<h2>我的资料</h2>' +
@@ -944,7 +998,6 @@ function openProfileModal() {
       return;
     }
 
-    // 更新本地状态
     me.name = payloadName;
     me.avatar = tempAvatar;
     
@@ -952,7 +1005,7 @@ function openProfileModal() {
     refreshTopbar();
     closeModal();
     toast('资料已更新 ✅');
-    renderMembers(); // 刷新成员列表
+    renderMembers();
   });
 }
 
