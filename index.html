@@ -786,16 +786,48 @@ function renderAlbum() {
 function bindAlbumEvents() {
   $('#photoInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
-    toast('正在上传到云端...');
+    
     for (var i = 0; i < files.length; i++) {
-      var f = files[i]; var path = 'photos/' + Date.now() + '_' + f.name;
-      var { data, error } = await db.storage.from('media').upload(path, f);
-      if (!error) {
-        var { data: urlData } = db.storage.from('media').getPublicUrl(path);
-        await db.from('photos').insert({ name: f.name, kind: 'image', blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
+      var f = files[i];
+      var path = 'photos/' + Date.now() + '_' + f.name;
+      
+      toast('正在上传 ' + f.name + '...');
+
+      // 1. 上传到 Storage
+      const { data: uploadData, error: uploadErr } = await db.storage.from('media').upload(path, f);
+      if (uploadErr) {
+        console.error("Storage上传报错:", uploadErr);
+        toast('上传网盘失败: ' + uploadErr.message);
+        continue;
+      }
+
+      // 2. 获取公开 URL
+      const { data: urlData } = db.storage.from('media').getPublicUrl(path);
+      if (!urlData || !urlData.publicUrl) {
+        toast('获取图片网址失败');
+        continue;
+      }
+
+      // 3. 写入数据库
+      const { error: dbErr } = await db.from('photos').insert({ 
+        name: f.name, 
+        kind: 'image', 
+        blob_key: urlData.publicUrl, 
+        uploader_id: me.id, 
+        uploader_name: me.name 
+      });
+
+      if (dbErr) {
+        console.error("数据库写入报错:", dbErr);
+        toast('写入数据库失败: ' + dbErr.message);
+        continue;
       }
     }
-    e.target.value = ''; toast('上传成功'); await fetchAllData(); renderAlbum();
+    
+    e.target.value = ''; 
+    toast('操作完成'); 
+    await fetchAllData(); 
+    renderAlbum();
   });
 }
 
