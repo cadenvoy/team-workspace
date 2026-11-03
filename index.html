@@ -178,11 +178,11 @@ main{max-width:1300px;margin:0 auto;padding:22px 20px 90px}
 .lightbox img,.lightbox video{max-width:100%;max-height:66vh;display:block}
 .lightbox-bar{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:12px;font-size:13px;color:var(--muted);flex-wrap:wrap}
 .lightbox-bar .acts{display:flex;gap:8px}
-.crop-wrap{display:flex;justify-content:center;margin-bottom:14px}
+#cropModalWrap{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(0,0,0,.6)}
 #cropCanvas{width:min(300px,100%);height:auto;aspect-ratio:1/1;background:#eef2fa;touch-action:none;cursor:grab;border-radius:6px}
-.crop-ctrl{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted)}
+.crop-ctrl{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--muted);margin-top:14px}
 .crop-ctrl input[type=range]{flex:1;accent-color:var(--primary)}
-#toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);z-index:999;background:rgba(28,36,48,.94);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;max-width:80vw;text-align:center}
+#toast{position:fixed;left:50%;bottom:32px;transform:translateX(-50%) translateY(20px);z-index:9999;background:rgba(28,36,48,.94);color:#fff;padding:10px 18px;border-radius:10px;font-size:14px;opacity:0;pointer-events:none;transition:.25s;max-width:80vw;text-align:center}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .invite-code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;font-weight:600;letter-spacing:.5px;color:var(--primary)}
 .invite-badge{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:999px}
@@ -420,24 +420,6 @@ function canChangeRole() { return isLeader(); }
 function getFakeEmail(name) { return name.toLowerCase().replace(/[^a-z0-9]/g, '') + '@example.com'; }
 
 /* ---------- 头像处理 & 裁剪 ---------- */
-function compressImage(file, maxDim, quality) {
-  maxDim = maxDim || 1600; quality = quality || 0.85;
-  return new Promise(function(res, rej) {
-    var img = new Image(); var objUrl = URL.createObjectURL(file);
-    img.onload = function() {
-      var w = img.width, h = img.height;
-      var scale = Math.min(1, maxDim / Math.max(w, h));
-      w = Math.max(1, Math.round(w * scale)); h = Math.max(1, Math.round(h * scale));
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var ctx = cv.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0,0,w,h); ctx.drawImage(img,0,0,w,h);
-      URL.revokeObjectURL(objUrl);
-      cv.toBlob(function(b) { b ? res(b) : rej(new Error('压缩失败')); }, 'image/jpeg', quality);
-    };
-    img.onerror = function() { URL.revokeObjectURL(objUrl); rej(new Error('图片读取失败')); };
-    img.src = objUrl;
-  });
-}
-
 function openCropModal(file, onDone) {
   if (!file) return;
   var reader = new FileReader();
@@ -448,14 +430,25 @@ function openCropModal(file, onDone) {
       var baseScale = Math.max(S / img.width, S / img.height);
       var zoom = 1, offX = 0, offY = 0, dragging = false;
       var startX = 0, startY = 0, startOffX = 0, startOffY = 0;
-      openModal(
-        '<h2>裁剪头像</h2>' +
-        '<div class="crop-wrap"><canvas id="cropCanvas" width="'+S+'" height="'+S+'"></canvas></div>' +
-        '<div class="crop-ctrl"><span>缩放</span><input type="range" id="cropZoom" min="1" max="3" step="0.01" value="1" /></div>' +
-        '<p class="sub" style="text-align:center;margin:10px 0 0">拖动图片调整位置，滑动滑块缩放</p>' +
-        '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="cropOk">确定</button></div>'
-      );
-      var cv = $('#cropCanvas'); var ctx = cv.getContext('2d');
+      
+      var cropDiv = document.createElement('div');
+      cropDiv.id = 'cropModalWrap';
+      cropDiv.innerHTML = 
+        '<div style="background:#fff;padding:20px;border-radius:16px;width:340px">' +
+          '<h2 style="margin:0 0 14px;font-size:18px">裁剪头像</h2>' +
+          '<div style="display:flex;justify-content:center"><canvas id="cropCanvas" width="'+S+'" height="'+S+'"></canvas></div>' +
+          '<div class="crop-ctrl"><span>缩放</span><input type="range" id="cropZoom" min="1" max="3" step="0.01" value="1" /></div>' +
+          '<p class="sub" style="text-align:center;margin:10px 0 0">拖动图片调整位置，滑动滑块缩放</p>' +
+          '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">' +
+            '<button class="btn ghost" id="cropCancel">取消</button>' +
+            '<button class="btn primary" id="cropOk">确定</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(cropDiv);
+
+      var cv = document.getElementById('cropCanvas'); 
+      var ctx = cv.getContext('2d');
+      
       function transform() {
         var scale = baseScale * zoom; var dw = img.width * scale, dh = img.height * scale;
         var mx = Math.max(0, (dw - S) / 2), my = Math.max(0, (dh - S) / 2);
@@ -471,6 +464,7 @@ function openCropModal(file, onDone) {
         ctx.strokeStyle = 'rgba(59,110,245,.85)'; ctx.lineWidth = 2; ctx.stroke();
       }
       draw();
+      
       cv.addEventListener('pointerdown', function(e) {
         dragging = true; startX = e.clientX; startY = e.clientY; startOffX = offX; startOffY = offY;
         try { cv.setPointerCapture(e.pointerId); } catch (_) {}
@@ -482,14 +476,18 @@ function openCropModal(file, onDone) {
       });
       function stop() { dragging = false; }
       cv.addEventListener('pointerup', stop); cv.addEventListener('pointercancel', stop); cv.addEventListener('pointerleave', stop);
-      $('#cropZoom').addEventListener('input', function(e) { zoom = parseFloat(e.target.value); draw(); });
-      $('#cropOk').addEventListener('click', function() {
+      
+      document.getElementById('cropZoom').addEventListener('input', function(e) { zoom = parseFloat(e.target.value); draw(); });
+      document.getElementById('cropCancel').addEventListener('click', function() { document.body.removeChild(cropDiv); });
+      document.getElementById('cropOk').addEventListener('click', function() {
         var t = transform(); var out = document.createElement('canvas'); out.width = out.height = OUT;
         var octx = out.getContext('2d'); var k = OUT / S; octx.save();
         octx.beginPath(); octx.arc(OUT/2,OUT/2,OUT/2,0,Math.PI*2); octx.clip();
         octx.fillStyle = '#fff'; octx.fillRect(0,0,OUT,OUT);
         octx.drawImage(img,t.x*k,t.y*k,t.dw*k,t.dh*k); octx.restore();
-        var data = out.toDataURL('image/jpeg', 0.9); closeModal(); onDone(data);
+        var data = out.toDataURL('image/jpeg', 0.9); 
+        document.body.removeChild(cropDiv);
+        onDone(data);
       });
     };
     img.onerror = function() { toast('图片读取失败'); };
@@ -572,7 +570,6 @@ async function fetchAllData() {
       db.from('invite_codes').select('*').order('created_at', { ascending: false })
     ]);
 
-    // 检查是否有报错，有则打印在控制台
     if (photosRes.error) console.error("读取 photos 表失败:", photosRes.error);
     if (tasksRes.error) console.error("读取 tasks 表失败:", tasksRes.error);
 
@@ -744,16 +741,33 @@ function bindTaskEvents() {
       toast('已删除'); await fetchAllData(); renderTasks();
     }
     if (btn.dataset.act === 'detail') {
-      alert('任务：' + task.title + '\n\n描述：' + (task.description || '无'));
+      alert('任务：' + task.title + '\n\n组别：' + task.group_name + '\n负责人：' + task.owner + '\n截止：' + task.due_date + '\n\n描述：' + (task.description || '无'));
     }
   });
 
   $('#btnNewTask').addEventListener('click', function() {
-    openModal('<h2>发布任务</h2><div class="field"><label>标题</label><input id="tTitle" /></div><div class="field"><label>描述</label><textarea id="tDesc" rows="3"></textarea></div>' +
+    openModal('<h2>发布任务</h2>' +
+      '<div class="field"><label>任务标题</label><input id="tTitle" placeholder="例如：联系实践接收单位" /></div>' +
+      '<div class="field"><label>任务描述</label><textarea id="tDesc" rows="3" placeholder="具体交付标准等"></textarea></div>' +
+      '<div class="grid2">' +
+        '<div class="field"><label>负责组别</label><select id="tGroup">'+GROUPS.map(g => '<option>'+g+'</option>').join('')+'</select></div>' +
+        '<div class="field"><label>负责人</label><input id="tOwner" value="'+esc(me.name)+'" /></div>' +
+      '</div>' +
+      '<div class="field"><label>截止日期</label><input id="tDue" type="date" /></div>' +
       '<div class="modal-actions"><button class="btn ghost" data-close>取消</button><button class="btn primary" id="tSave">发布</button></div>');
+      
     $('#tSave').addEventListener('click', async function() {
       var title = $('#tTitle').value.trim(); if (!title) return toast('请输入标题');
-      await db.from('tasks').insert({ title: title, description: $('#tDesc').value.trim(), group_name: GROUPS[0], owner: me.name, status: 'todo', created_by: me.id, creator_name: me.name });
+      await db.from('tasks').insert({ 
+        title: title, 
+        description: $('#tDesc').value.trim(), 
+        group_name: $('#tGroup').value, 
+        owner: $('#tOwner').value.trim(), 
+        due_date: $('#tDue').value, 
+        status: 'todo', 
+        created_by: me.id, 
+        creator_name: me.name 
+      });
       closeModal(); toast('已发布'); await fetchAllData(); renderTasks();
     });
   });
@@ -787,68 +801,136 @@ function bindDocEvents() {
 
 /* ---------- 相册模块 ---------- */
 function renderAlbum() {
-  try {
-    $('#albumCrumbs').innerHTML = '<span class="crumb cur">🏠 根目录</span>';
-    if (!DB.photos || DB.photos.length === 0) {
-      $('#albumContent').innerHTML = '<div class="empty">暂无照片，快上传一张吧！</div>';
-      return;
-    }
-    
-    $('#albumContent').innerHTML = '<div class="gallery">' + DB.photos.map(function(p) {
-      var imgUrl = p.blob_key ? p.blob_key : 'https://via.placeholder.com/200?text=No+Image';
-      return '<figure class="ph"><div class="thumb"><img src="'+imgUrl+'" /></div><figcaption>'+esc(p.uploader_name || '未知')+'</figcaption></figure>';
-    }).join('') + '</div>';
-  } catch (err) {
-    console.error("相册渲染崩溃:", err);
-    $('#albumContent').innerHTML = '<div class="empty" style="color:red">相册显示失败，请按 F12 查看控制台</div>';
+  var content = $('#albumContent');
+  
+  if (albumState.selectMode) {
+    $('#btnMulti').textContent = '取消多选';
+    $('#btnMulti').classList.add('on');
+    $('#multiBar').hidden = false;
+    $('#multiCount').textContent = '已选 ' + albumState.selected.size + ' 项';
+  } else {
+    $('#btnMulti').textContent = '多选';
+    $('#btnMulti').classList.remove('on');
+    $('#multiBar').hidden = true;
   }
+
+  // 渲染面包屑
+  if (albumState.filter === 'fav') {
+    $('#albumCrumbs').innerHTML = '<button class="crumb" data-crumb="root">🏠 根目录</button><span class="crumb-sep">/</span><span class="crumb cur">⭐ 收藏</span>';
+  } else {
+    $('#albumCrumbs').innerHTML = '<button class="crumb ' + (albumState.currentFolderId ? '' : 'cur') + '" data-crumb="root">🏠 根目录</button>';
+  }
+
+  // 判断显示内容
+  if (albumState.filter === 'all' && !albumState.currentFolderId) {
+    // 根目录只显示文件夹（如果支持嵌套的话）
+    // 这里为了简洁，直接显示所有文件夹和图片，混排
+  }
+
+  var items = DB.photos.slice();
+  if (albumState.filter === 'fav') items = items.filter(function(p) { return p.fav; });
+  
+  // 渲染网格
+  if (!items.length) {
+    content.innerHTML = '<div class="empty">' + (albumState.filter === 'fav' ? '暂无收藏照片' : '暂无照片，快上传一张吧！') + '</div>';
+  } else {
+    content.innerHTML = '<div class="gallery">' + items.map(function(p) {
+      var selected = albumState.selected.has(p.id) ? 'selected' : '';
+      return '<figure class="ph ' + selected + '" data-id="'+p.id+'">' +
+        '<div class="thumb"><img src="'+p.blob_key+'" /></div>' +
+        (albumState.selectMode 
+          ? '<div class="ph-check">'+(selected ? '✓' : '')+'</div>' 
+          : '<div class="ph-fav '+(p.fav?'on':'')+'" data-act="fav" data-id="'+p.id+'">★</div>') +
+        '<figcaption>'+esc(p.uploader_name || '未知')+'</figcaption>' +
+      '</figure>';
+    }).join('') + '</div>';
+  }
+
+  $('#albumSummary').textContent = '共 ' + DB.photos.length + ' 个媒体';
 }
 
 function bindAlbumEvents() {
+  // 筛选
+  $$('#albumSeg .seg-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      $$('#albumSeg .seg-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      albumState.filter = btn.dataset.filter;
+      renderAlbum();
+    });
+  });
+
+  // 上传
   $('#photoInput').addEventListener('change', async function(e) {
     var files = e.target.files; if (!files.length) return;
-    
     for (var i = 0; i < files.length; i++) {
-      var f = files[i];
-      var path = 'photos/' + Date.now() + '_' + f.name;
-      
+      var f = files[i]; var path = 'photos/' + Date.now() + '_' + f.name;
       toast('正在上传 ' + f.name + '...');
-
-      // 1. 上传到 Storage
       const { data: uploadData, error: uploadErr } = await db.storage.from('media').upload(path, f);
-      if (uploadErr) {
-        console.error("Storage上传报错:", uploadErr);
-        alert('上传网盘失败: ' + uploadErr.message);
-        continue;
-      }
-
-      // 2. 获取公开 URL
+      if (uploadErr) { alert('网盘上传失败: ' + uploadErr.message); continue; }
       const { data: urlData } = db.storage.from('media').getPublicUrl(path);
-      if (!urlData || !urlData.publicUrl) {
-        alert('获取图片网址失败');
-        continue;
-      }
+      await db.from('photos').insert({ name: f.name, kind: 'image', blob_key: urlData.publicUrl, uploader_id: me.id, uploader_name: me.name });
+    }
+    e.target.value = ''; await fetchAllData(); renderAlbum(); toast('上传成功');
+  });
 
-      // 3. 写入数据库
-      const { data: insertData, error: dbErr } = await db.from('photos').insert({ 
-        name: f.name, 
-        kind: 'image', 
-        blob_key: urlData.publicUrl, 
-        uploader_id: me.id, 
-        uploader_name: me.name 
-      }).select();
+  // 点击图片
+  $('#albumContent').addEventListener('click', function(e) {
+    var favBtn = e.target.closest('.ph-fav');
+    if (favBtn) {
+      e.stopPropagation();
+      var pId = favBtn.dataset.id;
+      var p = DB.photos.find(x => x.id === pId);
+      if (p) { p.fav = !p.fav; db.from('photos').update({fav: p.fav}).eq('id', pId).then(() => renderAlbum()); }
+      return;
+    }
 
-      if (dbErr) {
-        console.error("数据库写入报错:", dbErr);
-        alert('❌ 数据库写入失败: ' + dbErr.message);
+    var fig = e.target.closest('.ph');
+    if (!fig) return;
+    var pId = fig.dataset.id;
+
+    if (albumState.selectMode) {
+      if (albumState.selected.has(pId)) albumState.selected.delete(pId);
+      else albumState.selected.add(pId);
+      renderAlbum();
+    } else {
+      var p = DB.photos.find(x => x.id === pId);
+      if (p) window.open(p.blob_key, '_blank');
+    }
+  });
+
+  // 多选
+  $('#btnMulti').addEventListener('click', function() {
+    albumState.selectMode = !albumState.selectMode;
+    albumState.selected.clear();
+    renderAlbum();
+  });
+  $('#multiCancel').addEventListener('click', function() {
+    albumState.selectMode = false; renderAlbum();
+  });
+  $('#multiAll').addEventListener('click', function() {
+    DB.photos.forEach(p => { if (albumState.filter === 'all' || p.fav) albumState.selected.add(p.id); });
+    renderAlbum();
+  });
+  $('#multiDelete').addEventListener('click', async function() {
+    if (!albumState.selected.size) return toast('请先勾选');
+    if (!confirm('确定删除选中的 ' + albumState.selected.size + ' 张图片？')) return;
+    for (let id of albumState.selected) {
+      await db.from('photos').delete().eq('id', id);
+    }
+    albumState.selected.clear(); albumState.selectMode = false; await fetchAllData(); renderAlbum();
+  });
+  $('#multiDownload').addEventListener('click', function() {
+    if (!albumState.selected.size) return toast('请先勾选');
+    for (let id of albumState.selected) {
+      var p = DB.photos.find(x => x.id === id);
+      if (p) {
+        var a = document.createElement('a'); a.href = p.blob_key; a.target = '_blank'; a.download = p.name; a.click();
       }
     }
-    
-    e.target.value = ''; 
-    await fetchAllData(); 
-    renderAlbum();
-    alert('文件处理流程结束');
   });
+  
+  $('#btnNewFolder').addEventListener('click', function() { toast('文件夹功能正在接入...'); });
 }
 
 /* ---------- 成员信息表 ---------- */
@@ -856,14 +938,29 @@ function renderMembers() {
   var tbody = $('#memberBody');
   tbody.innerHTML = DB.members.map(function(m) {
     var acts = canEditMember(m) ? '<button class="btn ghost sm" data-act="edit" data-id="'+m.id+'">编辑</button>' : '';
-    return '<tr><td>'+esc(m.name)+'</td><td>'+esc(m.group_name)+'</td><td>'+esc(m.role)+'</td><td colspan="11">' +
-      '<span class="sub">（信息已同步云端）</span></td><td>'+acts+'</td></tr>';
+    return '<tr>' +
+      '<td>'+esc(m.name)+'</td>' +
+      '<td>'+esc(m.group_name)+'</td>' +
+      '<td>'+esc(m.role)+'</td>' +
+      '<td>'+esc(m.school||'-')+'</td>' +
+      '<td>'+esc(m.college||'-')+'</td>' +
+      '<td>'+esc(m.grade||'-')+'</td>' +
+      '<td>'+esc(m.major||'-')+'</td>' +
+      '<td>'+esc(m.student_id||'-')+'</td>' +
+      '<td>'+esc(m.ethnicity||'-')+'</td>' +
+      '<td>'+esc(m.political||'-')+'</td>' +
+      '<td>'+esc(m.id_card||'-')+'</td>' +
+      '<td>'+esc(m.phone||'-')+'</td>' +
+      '<td>'+esc(m.emergency_name||'-')+'</td>' +
+      '<td>'+esc(m.emergency_phone||'-')+'</td>' +
+      '<td><div class="row-actions">'+acts+'</div></td>' +
+    '</tr>';
   }).join('');
   
   tbody.querySelectorAll('button[data-act="edit"]').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var m = DB.members.find(x => x.id === btn.dataset.id);
-      if (canEditMember(m)) openProfileModal();
+      if (canEditMember(m)) openProfileModal(); // 目前统一打开自己的资料
     });
   });
 }
@@ -964,7 +1061,7 @@ function openProfileModal() {
   });
   $('#pfFile').addEventListener('change', function(e) {
     var f = e.target.files[0]; e.target.value = ''; if (!f) return;
-    openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); });
+    openCropModal(f, function(data) { tempAvatar = { kind:'image', data:data }; paint(); }); // 独立悬浮层，不会摧毁资料弹窗
   });
   $('#pfName').addEventListener('input', paint);
 
