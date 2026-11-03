@@ -421,7 +421,7 @@ function setAvatar(el, avatar, name) {
   if (avatar && avatar.kind === 'image' && avatar.data) el.innerHTML = '<img src="'+avatar.data+'" alt="" />';
   else if (avatar && avatar.kind === 'gen') { 
     el.style.background = avatar.color || '#3b6ef5'; 
-    if(avatar.color === '#FFFFFF') el.style.color = '#333'; // 白色背景配深色字
+    if(avatar.color === '#FFFFFF') el.style.color = '#333';
     el.textContent = avatar.emoji || (name ? name[0] : '?'); 
   }
   else { el.style.background = '#3b6ef5'; el.textContent = name ? name[0] : '?'; }
@@ -438,7 +438,6 @@ function avatarHTML(name, avatar, sizeClass) {
   return '<span class="avatar '+sizeClass+'" style="background:#3b6ef5">'+(name ? name[0] : '?')+'</span>';
 }
 
-// 绑定注册页头像选择事件
 function bindAvatarPicker() {
   $('#apColors').innerHTML = AP_COLORS.map(function(c) { 
     return '<button type="button" class="dot" data-color="'+c+'" style="background:'+c+'"></button>'; 
@@ -549,15 +548,31 @@ function bindAuthForms() {
 
     $('#btnRegSubmit').textContent = '注册中...'; $('#btnRegSubmit').disabled = true;
 
-    const { data: invite, error: invErr } = await db.from('invite_codes').select('*').eq('code', codeVal).eq('used', false).eq('voided', false).single();
-    if (invErr || !invite) {
+    // 查询邀请码 (使用 maybeSingle 避免没查到直接抛错)
+    const { data: invite, error: invErr } = await db.from('invite_codes').select('*').eq('code', codeVal).eq('used', false).eq('voided', false).maybeSingle();
+    
+    if (invErr) {
+      console.error("Supabase查询错误:", invErr);
+      errEl.textContent = '查询错误: ' + invErr.message; 
+      $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return;
+    }
+    if (!invite) {
       errEl.textContent = '注册密钥无效或已被使用'; 
       $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return;
     }
 
+    // 创建 Auth 用户
     const { data: authData, error: authErr } = await db.auth.signUp({ email: getFakeEmail(name), password: pass });
-    if (authErr) { errEl.textContent = authErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
+    if (authErr) { 
+      if(authErr.message.includes('already registered')) {
+        errEl.textContent = '该用户名已被占用，请换一个用户名'; 
+      } else {
+        errEl.textContent = authErr.message; 
+      }
+      $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; 
+    }
 
+    // 写入 members 表
     const role = invite.role === 'leader' ? '支队长' : '支队员';
     const avatarStr = regAvatar ? JSON.stringify(regAvatar) : '';
     
@@ -567,6 +582,7 @@ function bindAuthForms() {
     
     if (memErr) { errEl.textContent = '创建成员信息失败: ' + memErr.message; $('#btnRegSubmit').textContent = '注册并进入'; $('#btnRegSubmit').disabled = false; return; }
 
+    // 标记邀请码已用
     await db.from('invite_codes').update({ used: true, used_by: name, used_at: new Date().toISOString() }).eq('id', invite.id);
 
     await fetchAllData();
